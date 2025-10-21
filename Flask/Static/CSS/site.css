@@ -1,0 +1,331 @@
+﻿/* Overall font */
+* {
+  font-family: "Poppins", sans-serif;
+  font-optical-sizing: auto;
+  font-style: normal;
+}
+
+/* Background Image */
+body {
+  font-family: 'Poppins';
+  background-image: url('../Media/createbackground.jpg');
+  background-blend-mode: overlay;
+  background-color: rgba(255, 255, 255, 0.7);
+  background-size: cover;
+  background-position: center;
+  margin: 0 0 80px 0;
+  padding: 0;
+  z-index: -2;
+}
+
+/* CSS of buttons
+.btn {
+  color: #fff;
+  background-color: rgb(11, 168, 129);
+  border-color:  rgb(11, 168, 129);
+  border-radius: 3rem;
+  padding:.375rem .75rem;
+}
+
+/* Hover effect for buttons
+.btn:hover {
+  color: #fff;
+  background-color: rgb(0, 73, 55);
+  border-color: rgb(0, 73, 55);
+  padding: .375rem 1rem ;
+  transition: background-color 0.3s, color 0.3s, padding 0.3s;
+} */
+
+/* CSS for index Page 
+#homeContainer{
+  margin-top: 5rem;
+}*/
+
+#homeImage{
+  width: 100%;
+  object-fit: cover;
+}
+
+/******************************************************************************************************************/
+
+#Welcome {
+    margin-top:50px;
+}
+
+h1 {
+    text-align: center;
+    font-size: 6vw;
+    text-transform:uppercase;
+}
+
+h4 {
+    text-align: center;
+    font-size: 20px;
+}
+
+#flightTab {
+    border-radius: 25px 0 0 0;
+}
+
+#aircraftTab {
+    border-radius: 0 25px 0 0;
+}
+
+#navtable {
+    margin-top: 30px;
+    padding: 0 130px;
+    vertical-align:central;
+   
+}
+
+
+.btn {
+    max-width: 400px;
+    width:100%;
+    color: black;
+    box-sizing: border-box;
+    background-color: white;
+    border-style: solid;
+    border-color: #b7b7b7;
+    border-width: 1px;
+    border-radius: 5px;
+    font-size: 17px;
+    margin: 10px 10px;
+    padding: 13px 10px;
+    white-space: normal;
+}
+
+.btn:hover, .btn:focus {
+    color: #ff9900;
+    outline: none;
+    border-color: #ff9900;
+}
+
+
+.tablink {
+    text-align: center;
+    margin-bottom:10px;
+    background-color: #f6b26bff;
+    color: white;
+    float: left;
+    border: none;
+    outline: none;
+    padding: 14px 5px;
+    font-size: 25px;
+    width: calc(100%/3);
+    white-space: normal;
+}
+
+.tablink:focus {
+    outline: none;
+}
+
+.tablink:hover {
+    background-color: coral;
+    transition: background-color 0.3s;
+}
+
+.tabcontent {
+    flex-wrap: wrap;
+    justify-content: space-evenly;
+    color: white;
+    display: none;
+    padding: 10px;
+    text-align: center;
+    background-color: white;
+    border-radius: 0 0 25px 25px;
+    box-shadow: 0 4px 3px lightgrey;
+}
+
+
+@media only screen and (max-width: 1199px){
+    .btn{
+        max-width:100%;
+    }
+
+    .tabcontent{
+        padding-right:30px;
+    }
+
+}
+
+
+@media only screen and (max-width: 1000px) {
+   #navtable{
+       padding:0px;
+   }
+}
+
+@media only screen and (max-width: 500px) {
+   .tablink{
+       font-size:14px;
+   }
+   
+   h1{
+       font-size:30px;
+   }
+}
+
+/* CSS for Tests Page */
+.testsImg{
+  width: 50%;
+  object-fit: cover;
+  margin-top: 20px;
+}
+
+.testsBtn{
+  height: 250px;
+  margin-top: 20px;
+}
+
+.testsBtnContainer{
+  margin-top: 20px;
+  padding: 0px;
+}
+
+#testDesc{
+  margin-top: 20px;
+}
+
+/* CSS for Heart Disease test Page */
+#heartForm{
+  background-color:rgb(251,226,176); 
+  padding:20px; 
+  border-radius:20px;
+}
+
+#heartInfo{
+  background-color:rgb(189,238,217);
+  padding:20px;
+  border-radius:20px;
+  
+}
+
+#heartImg{
+  width: 40%;
+  object-fit: cover;
+  text-align: center;
+}
+
+/* CSS for Cancer Test Page */
+#cancerForm{
+  background-color:rgb(251,226,176); 
+  padding:20px; 
+  border-radius:20px;
+}
+
+#cancerInfo{
+  background-color:rgb(189,238,217);
+  padding:20px;
+  border-radius:20px;
+  
+}
+
+#cancerImg{
+  width: 40%;
+  object-fit: cover;
+  text-align: center;
+}
+
+/* CSS for Stroke Test Page */
+#strokeForm{
+  background-color:rgb(251,226,176); 
+  padding:20px; 
+  border-radius:20px;
+}
+
+#strokeInfo{
+  background-color:rgb(189,238,217);
+  padding:20px;
+  border-radius:20px;
+  
+}
+
+#strokeImg{
+  width: 40%;
+  object-fit: cover;
+  text-align: center;
+}
+
+/* CSS for Pneumonia Test Page */
+#pneumoniaForm{
+  background-color:rgb(251,226,176); 
+  padding:20px; 
+  border-radius:20px;
+}
+
+#pneumoniaInfo{
+  background-color:rgb(189,238,217);
+  padding:20px;
+  border-radius:20px;
+}
+
+#errorMsg{
+  color: red;
+  font-weight: bold;
+  text-align: center;
+}
+
+#pneumoniaImg{
+  width: 40%;
+  object-fit: cover;
+  text-align: center;
+}
+
+/* CSS for loading Page */
+.dot {
+  height: 25px;
+  width: 25px;
+  background-color:rgb(0, 73, 55);
+  border-radius: 50%;
+  margin: 2px;
+  display: inline-block;
+  animation: bounce 1.5s infinite ease-in-out;
+  margin: 0 5px;
+}
+
+/*Loading Animation*/
+@keyframes bounce {
+  0%,
+  100% {
+      transform: translateY(-50%);
+  }
+
+  50% {
+      transform: translateY(0);
+  }
+}
+
+
+/* CSS for Results Page */
+#resultsInfo{
+  text-align: center;
+}
+
+#resultsHeader{
+  font-weight: bold;
+  font-size: 4rem;
+}
+
+#resultsNumber{
+  font-weight: bold;
+  font-size: 9rem;
+}
+
+
+
+
+/* Sticky footer styles
+-------------------------------------------------- */
+html {
+  position: relative;
+  min-height: 100%;
+}
+
+.footer {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  white-space: nowrap;
+  line-height: 60px; /* Vertically center the text there */
+}
