@@ -9,8 +9,12 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='CSS/baseNavbar.css') }}">
     <!-- Overall Site CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='CSS/site.css') }}">
+    <!-- Dashboard CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='CSS/dashboard.css') }}">
     <!-- Google Fonts -->
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@700&display=swap" type="text/css">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <!-- Overall Site JS -->
     <script src="{{ url_for('static', filename='JS/siteJS.js') }}"></script>
      <!-- Bootstrap JS and dependencies -->
@@ -31,28 +35,8 @@
                 <a class="navbar-brand" href="{{url_for('index')}}">AirlinesDB</a>
                 <!----Toggler for mobile view of navbar---->
                 <button class="navbar-toggler" type="button" data-toggle="collapse" data-target=".navbar-collapse" aria-controls="navbarSupportedContent"
-                        aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
                 </button>
                 <!----Navbar links---->
-                <div class="collapse navbar-collapse" id="homeNavbar"> 
-                    <div class="navbar-nav ml-auto">
-                        <!----Navigates user to index page------->
-                        <a class="nav-link" href="{{url_for('index')}}">Home</a>
-                        <!----Dropdown for health tests---->
-                        <div class="dropdown">
-                            <button class="dropbtn" id="healthDropBtn">
-                                <a class="nav-link" href="{{ url_for('index')}}">Aircrafts</a>
-                            </button>
-                            <div class="dropdown-content" id="healthDropdown">
-                                <a href="{{url_for('index')}}">Create</a>
-                                <a href="{{url_for('index')}}">Update</a>
-                                <a href="{{url_for('index')}}">Function</a>
-                                <a href="{{url_for('index')}}">Function</a>
-                            </div>
-                        </div>
-                    </div>               
-                </div>
             </div>
         </nav>
     </header>
