@@ -395,6 +395,5 @@ def advanced_metrics():
         'top_routes': top_routes
     })
 
-
 if __name__ == '__main__':
     app.run(debug=True)
