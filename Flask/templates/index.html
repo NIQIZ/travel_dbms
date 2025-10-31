@@ -1,0 +1,179 @@
+{% extends 'base.html' %}
+
+{% block head %}
+<title>Airlines Database - Home</title>
+<!-- Chart.js for visualizations -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block body %}
+<!-- Hero Section with Background Image -->
+<section class="hero-section" id="hero">
+    <div class="container" id="homeContainer">
+        <div class="row">
+            <div class="container">
+                <h1 id="Welcome">WELCOME</h1>
+                <h4>WHAT WOULD YOU LIKE TO DO TODAY?</h4>
+            </div>
+            <div class="container" id="navtable">
+                <button class="tablink" onclick="openOptions('FLIGHT',this)" id="flightTab">FLIGHT</button>
+                <button class="tablink" onclick="openOptions('PERSONNEL',this)" id="personnelTab">BOOKINGS</button>
+                <button class="tablink" onclick="openOptions('AIRCRAFT',this)" id="aircraftTab">AIRCRAFT</button>
+                <br />
+
+                <div id="FLIGHT" class="tabcontent">
+                    <a class="btn" id="btnCreateFPR" href="{{url_for('index')}}">CREATE FLIGHT ROUTE</a>
+                    <a class="btn" id="btnViewFR" href="{{url_for('index')}}">VIEW FLIGHT ROUTE AND FLIGHT SCHEDULES</a>
+                    <a class="btn" id="btnCreateFS" href="{{url_for('index')}}">CREATE FLIGHT SCHEDULE</a>
+                    <a class="btn" id="btnUpdateFS" href="{{url_for('index')}}">UPDATE FLIGHT SCHEDULE STATUS</a>
+                </div>
+
+                <div id="PERSONNEL" class="tabcontent">
+                    <a class="btn" id="btnCreateFPR" href="{{url_for('index')}}">CREATE FLIGHT PERSONNEL RECORD</a>
+                    <a class="btn" id="btnViewFP" href="{{url_for('index')}}">VIEW ALL PERSONNEL AND FLIGHT ASSIGNED</a>
+                    <a class="btn" id="btnAssignFP" href="{{url_for('index')}}">ASSIGN PERSONNEL TO FLIGHT SCHEDULE</a>
+                    <a class="btn" id="btnUpdateFP" href="{{url_for('index')}}">UPDATE FLIGHT PERSONNEL STATUS</a>
+                </div>
+
+                <div id="AIRCRAFT" class="tabcontent">
+                    <a class="btn" id="btnCreateAirRec" href="{{url_for('index')}}">CREATE AIRCRAFT RECORD</a>
+                    <a class="btn" id="btnViewAir" href="{{url_for('index')}}">VIEW ALL AIRCRAFT AND FLIGHT ASSIGNED</a>
+                    <a class="btn" id="btnAssignAir" href="{{url_for('index')}}">ASSIGN AIRCRAFT TO FLIGHT SCHEDULE</a>
+                    <a class="btn" id="btnAssignAir" href="{{url_for('index')}}">UPDATE AIRCRAFT STATUS</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Scroll indicator at the bottom -->
+    <div class="scroll-indicator" onclick="document.getElementById('dashboard').scrollIntoView({behavior: 'smooth'})">
+        <i class="fas fa-chevron-down"></i>
+        <p style="margin-top: 10px; font-size: 0.9rem;">Scroll for Dashboard</p>
+    </div>
+</section>
+
+<!-- Dashboard Section -->
+<section class="dashboard-section" id="dashboard">
+    <div class="container">
+        <!-- Dashboard Header -->
+        <div class="dashboard-header">
+            <h2>Relational Database Analytics</h2>
+            <p>Real-time insights from your flight operations data</p>
+        </div>
+        
+        <!-- Key Metrics Row -->
+        <div class="row metrics-row" id="keyMetrics">
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <h3>Total Flights</h3>
+                    <div class="metric-value" id="totalFlights">-</div>
+                    <div class="metric-label">Operations</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <h3>On-Time Rate</h3>
+                    <div class="metric-value" id="ontimeRate">-</div>
+                    <div class="metric-label">Performance</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <h3>Avg Delay</h3>
+                    <div class="metric-value" id="avgDelay">-</div>
+                    <div class="metric-label">Minutes</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <h3>Cancellations</h3>
+                    <div class="metric-value" id="cancellations">-</div>
+                    <div class="metric-label">Flights</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Charts Row 1: Flight Operations -->
+        <div class="row">
+            <div class="col-md-6">
+                <div class="chart-card">
+                    <h4>Flight Status Distribution</h4>
+                    <div class="chart-container">
+                        <canvas id="statusChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="chart-card">
+                    <h4>Top 10 Busiest Routes</h4>
+                    <div class="chart-container">
+                        <canvas id="routesChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Charts Row 2: Performance & Demand -->
+        <div class="row">
+            <div class="col-md-6">
+                <div class="chart-card">
+                    <h4>On-Time Performance by Route</h4>
+                    <div class="chart-container">
+                        <canvas id="ontimeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="chart-card">
+                    <h4>Load Factor by Aircraft</h4>
+                    <div class="chart-container">
+                        <canvas id="loadFactorChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Charts Row 3: Revenue Analysis -->
+        <div class="row">
+            <div class="col-md-6">
+                <div class="chart-card">
+                    <h4>Revenue by Fare Class</h4>
+                    <div class="chart-container">
+                        <canvas id="revenueClassChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="chart-card">
+                    <h4>Top 10 Routes by Revenue</h4>
+                    <div class="chart-container">
+                        <canvas id="revenueRouteChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Charts Row 4: Resource Planning -->
+        <div class="row">
+            <div class="col-md-6">
+                <div class="chart-card">
+                    <h4>Aircraft Utilization (Flights per Day)</h4>
+                    <div class="chart-container">
+                        <canvas id="utilizationChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="chart-card">
+                    <h4>Monthly Revenue Trend</h4>
+                    <div class="chart-container">
+                        <canvas id="monthlyRevenueChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<script src="{{ url_for('static', filename='JS/dashboard.js') }}"></script>
+{% endblock %}
