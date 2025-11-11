@@ -49,18 +49,47 @@ def flight_operations():
     """Get flight operations metrics (scheduled vs completed, cancellations, delays)"""
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    # Create view for flight routes
+    cursor.execute("DROP VIEW IF EXISTS flight_routes;")
+    cursor.execute("""
+        CREATE VIEW flight_routes AS
+        SELECT 
+            f.*,
+            f.departure_airport || ' → ' || f.arrival_airport AS route
+        FROM flights f;""")
+
+    # Example: query the new view
+    cursor.execute("SELECT route, COUNT(*) as total FROM flight_routes GROUP BY route LIMIT 5;")
+    # cursor.execute("SELECT DISTINCT route, COUNT(*) as total FROM flight_routes GROUP BY route;")
+    flight_routes = [dict(row) for row in cursor.fetchall()]
+    print("\n=== Sample flight_routes data ===")
+    for row in flight_routes:
+        print(row)
     
-    # Flight status distribution
+    # Top 5 Least Punctual Routes
     cursor.execute("""
         SELECT 
-            status,
-            COUNT(*) as count
-        FROM flights
-        WHERE status IS NOT NULL AND status != ''
-        GROUP BY status
-        ORDER BY count DESC
+            route,
+            -- Strip the '+HH' or '+HH:MM' timezone offset before passing to JULIANDAY
+            ROUND(AVG(
+                (
+                    JULIANDAY(SUBSTR(actual_arrival, 1, 19)) - 
+                    JULIANDAY(SUBSTR(scheduled_arrival, 1, 19))
+                ) * 24 * 60
+            ), 2) AS avg_delay_mins
+        FROM flight_routes
+        WHERE status = 'Arrived'
+            AND actual_arrival IS NOT NULL
+            AND scheduled_arrival IS NOT NULL
+            -- Use the stripped timestamp for comparison to ensure valid JULIANDAY call
+            AND JULIANDAY(SUBSTR(actual_arrival, 1, 19)) > JULIANDAY(SUBSTR(scheduled_arrival, 1, 19))
+        GROUP BY route
+        HAVING avg_delay_mins > 0
+        ORDER BY avg_delay_mins DESC
+        LIMIT 5;
     """)
-    status_distribution = [dict(row) for row in cursor.fetchall()]
+    least_punctual_routes = [dict(row) for row in cursor.fetchall()]
     
     # Overall flight metrics
     cursor.execute("""
@@ -80,7 +109,7 @@ def flight_operations():
     
     conn.close()
     return jsonify({
-        'status_distribution': status_distribution,
+        'least_punctual_routes': least_punctual_routes,
         'overview': overview
     })
 

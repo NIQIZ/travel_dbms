@@ -60,7 +60,7 @@ async function loadDashboardData() {
         ]);
         
         updateKeyMetrics(flightOps.overview);
-        createStatusChart(flightOps.status_distribution);
+        createPunctualChart(flightOps.least_punctual_routes);
         createRoutesChart(routePerf.busiest_routes);
         createOntimeChart(routePerf.ontime_performance);
         createLoadFactorChart(passengerDemand.load_factors);
@@ -117,7 +117,7 @@ async function loadDashboardData() {
         updateKeyMetrics(flightOps.overview);
         
         // Create charts
-        createStatusChart(flightOps.status_distribution);
+        createPunctualChart(flightOps.least_punctual_routes);
         createRoutesChart(routePerf.busiest_routes);
         createOntimeChart(routePerf.ontime_performance);
         createLoadFactorChart(passengerDemand.load_factors);
@@ -140,23 +140,36 @@ function updateKeyMetrics(overview) {
     document.getElementById('cancellations').textContent = overview.cancelled_flights.toLocaleString();
 }
 
-function createStatusChart(data) {
-    const ctx = document.getElementById('statusChart').getContext('2d');
+function createPunctualChart(data) {
+    const ctx = document.getElementById('punctualChart').getContext('2d');
     new Chart(ctx, {
-        type: 'doughnut',
+        type: 'bar',
         data: {
-            labels: data.map(d => d.status),
+            labels: data.map(d => d.route),
             datasets: [{
-                data: data.map(d => d.count),
-                backgroundColor: ['#4CAF50', '#FF9800', '#F44336', '#2196F3', '#9C27B0'],
+                label: 'Average Delay (mins)',
+                data: data.map(d => d.avg_delay_mins),
+                backgroundColor: 'rgba(255, 99, 132, 0.8)', // Example color
+                borderColor: 'rgba(255, 99, 132, 1)',
+                borderWidth: 1
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            indexAxis: 'y', // Horizontal bar chart, for better label reading
             plugins: {
                 legend: {
-                    position: 'bottom'
+                    display: false
+                },
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Average Delay (mins)'
+                    }
                 }
             }
         }
