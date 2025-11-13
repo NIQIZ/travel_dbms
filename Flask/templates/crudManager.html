@@ -1,0 +1,502 @@
+{% extends 'base.html' %}
+
+{% block head %}
+<title>Database Management</title>
+<style>
+    .manage-container {
+        padding: 40px 20px;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+    
+    .manage-header {
+        text-align: center;
+        margin-bottom: 40px;
+    }
+    
+    .manage-header h1 {
+        color: #667eea;
+        margin-bottom: 10px;
+    }
+    
+    .tab-buttons {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 30px;
+        border-bottom: 2px solid #e0e0e0;
+    }
+    
+    .tab-btn {
+        padding: 12px 24px;
+        background: white;
+        border: none;
+        border-bottom: 3px solid transparent;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 500;
+        color: #666;
+        transition: all 0.3s;
+    }
+    
+    .tab-btn:hover {
+        color: #667eea;
+        background: #f5f7ff;
+    }
+    
+    .tab-btn.active {
+        color: #667eea;
+        border-bottom-color: #667eea;
+    }
+    
+    .tab-content {
+        display: none;
+        animation: fadeIn 0.3s;
+    }
+    
+    .tab-content.active {
+        display: block;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .controls {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        gap: 15px;
+        flex-wrap: wrap;
+    }
+    
+    .search-box {
+        display: flex;
+        gap: 10px;
+        flex: 1;
+        max-width: 400px;
+    }
+    
+    .search-box input {
+        flex: 1;
+        padding: 10px 15px;
+        border: 2px solid #e0e0e0;
+        border-radius: 6px;
+        font-size: 14px;
+    }
+    
+    .search-box input:focus {
+        outline: none;
+        border-color: #667eea;
+    }
+    
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: all 0.3s;
+    }
+    
+    .btn-primary {
+        background: #667eea;
+        color: white;
+    }
+    
+    .btn-primary:hover {
+        background: #5568d3;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    }
+    
+    .btn-success {
+        background: #4CAF50;
+        color: white;
+    }
+    
+    .btn-warning {
+        background: #FF9800;
+        color: white;
+    }
+    
+    .btn-danger {
+        background: #f44336;
+        color: white;
+    }
+    
+    .btn-sm {
+        padding: 6px 12px;
+        font-size: 12px;
+    }
+    
+    .data-table {
+        width: 100%;
+        background: white;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .data-table table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    
+    .data-table thead {
+        background: #667eea;
+        color: white;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 12px 15px;
+        text-align: left;
+        border-bottom: 1px solid #e0e0e0;
+    }
+    
+    .data-table th {
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 12px;
+        letter-spacing: 0.5px;
+    }
+    
+    .data-table tbody tr:hover {
+        background: #f5f7ff;
+    }
+    
+    .data-table td {
+        font-size: 14px;
+    }
+    
+    .action-buttons {
+        display: flex;
+        gap: 5px;
+    }
+    
+    .pagination {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        margin-top: 20px;
+        padding: 20px;
+    }
+    
+    .pagination button {
+        padding: 8px 12px;
+        border: 1px solid #e0e0e0;
+        background: white;
+        cursor: pointer;
+        border-radius: 4px;
+    }
+    
+    .pagination button:hover:not(:disabled) {
+        background: #667eea;
+        color: white;
+        border-color: #667eea;
+    }
+    
+    .pagination button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+    
+    .pagination span {
+        font-size: 14px;
+        color: #666;
+    }
+    
+    /* Modal Styles */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        animation: fadeIn 0.3s;
+    }
+    
+    .modal.active {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    
+    .modal-content {
+        background: white;
+        padding: 30px;
+        border-radius: 12px;
+        max-width: 600px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        animation: slideUp 0.3s;
+    }
+    
+    @keyframes slideUp {
+        from { transform: translateY(50px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+    }
+    
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 15px;
+        border-bottom: 2px solid #e0e0e0;
+    }
+    
+    .modal-header h2 {
+        color: #667eea;
+        margin: 0;
+    }
+    
+    .close {
+        font-size: 28px;
+        cursor: pointer;
+        color: #999;
+    }
+    
+    .close:hover {
+        color: #f44336;
+    }
+    
+    .form-group {
+        margin-bottom: 20px;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 500;
+        color: #333;
+    }
+    
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        width: 100%;
+        padding: 10px 15px;
+        border: 2px solid #e0e0e0;
+        border-radius: 6px;
+        font-size: 14px;
+        font-family: inherit;
+    }
+    
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+        outline: none;
+        border-color: #667eea;
+    }
+    
+    .form-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        margin-top: 25px;
+        padding-top: 20px;
+        border-top: 2px solid #e0e0e0;
+    }
+    
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: #999;
+    }
+    
+    .error-message {
+        background: #ffebee;
+        color: #c62828;
+        padding: 12px 20px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+        border-left: 4px solid #c62828;
+    }
+    
+    .success-message {
+        background: #e8f5e9;
+        color: #2e7d32;
+        padding: 12px 20px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+        border-left: 4px solid #2e7d32;
+    }
+    
+    .badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    
+    .badge-success {
+        background: #e8f5e9;
+        color: #2e7d32;
+    }
+    
+    .badge-warning {
+        background: #fff3e0;
+        color: #f57c00;
+    }
+    
+    .badge-danger {
+        background: #ffebee;
+        color: #c62828;
+    }
+    
+    .badge-info {
+        background: #e3f2fd;
+        color: #1976d2;
+    }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="manage-container">
+    <div class="manage-header">
+        <h1>Database Management</h1>
+        <p>Create, Read, Update, and Delete records from your travel database</p>
+    </div>
+    
+    <!-- Tab Buttons -->
+    <div class="tab-buttons">
+        <button class="tab-btn active" onclick="switchTab('flights')">
+            ✈️ Flights
+        </button>
+        <button class="tab-btn" onclick="switchTab('bookings')">
+            🎫 Bookings
+        </button>
+        <button class="tab-btn" onclick="switchTab('aircraft')">
+            🛫 Aircraft
+        </button>
+    </div>
+    
+    <!-- Flights Tab -->
+    <div id="flights-tab" class="tab-content active">
+        <div class="controls">
+            <div class="search-box">
+                <input type="text" id="flights-search" placeholder="Search flights...">
+                <button class="btn btn-primary" onclick="searchFlights()">Search</button>
+            </div>
+            <button class="btn btn-success" onclick="openCreateModal('flight')">
+                ➕ Add New Flight
+            </button>
+        </div>
+        
+        <div id="flights-message"></div>
+        
+        <div class="data-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Flight ID</th>
+                        <th>Flight No</th>
+                        <th>Route</th>
+                        <th>Scheduled Departure</th>
+                        <th>Status</th>
+                        <th>Aircraft</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="flights-tbody">
+                    <tr><td colspan="7" class="loading">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="pagination" id="flights-pagination"></div>
+    </div>
+    
+    <!-- Bookings Tab -->
+    <div id="bookings-tab" class="tab-content">
+        <div class="controls">
+            <div class="search-box">
+                <input type="text" id="bookings-search" placeholder="Search bookings...">
+                <button class="btn btn-primary" onclick="searchBookings()">Search</button>
+            </div>
+            <button class="btn btn-success" onclick="openCreateModal('booking')">
+                ➕ Add New Booking
+            </button>
+        </div>
+        
+        <div id="bookings-message"></div>
+        
+        <div class="data-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ticket No</th>
+                        <th>Book Ref</th>
+                        <th>Passenger Name</th>
+                        <th>Passenger ID</th>
+                        <th>Contact</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="bookings-tbody">
+                    <tr><td colspan="6" class="loading">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="pagination" id="bookings-pagination"></div>
+    </div>
+    
+    <!-- Aircraft Tab -->
+    <div id="aircraft-tab" class="tab-content">
+        <div class="controls">
+            <div class="search-box">
+                <input type="text" id="aircraft-search" placeholder="Search aircraft...">
+                <button class="btn btn-primary" onclick="searchAircraft()">Search</button>
+            </div>
+            <button class="btn btn-success" onclick="openCreateModal('aircraft')">
+                ➕ Add New Aircraft
+            </button>
+        </div>
+        
+        <div id="aircraft-message"></div>
+        
+        <div class="data-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Aircraft Code</th>
+                        <th>Model</th>
+                        <th>Range (km)</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="aircraft-tbody">
+                    <tr><td colspan="4" class="loading">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="pagination" id="aircraft-pagination"></div>
+    </div>
+</div>
+
+<!-- Create/Edit Modal -->
+<div id="recordModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="modal-title">Create Record</h2>
+            <span class="close" onclick="closeModal()">&times;</span>
+        </div>
+        <div id="modal-form"></div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='JS/crudManager.js') }}"></script>
+{% endblock %}

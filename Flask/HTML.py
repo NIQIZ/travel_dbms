@@ -644,9 +644,597 @@ def delete_nosql_booking(booking_id):
         return jsonify({'message': 'Booking deleted'})
     return jsonify({'error': 'Booking not found'}), 404
 
+# ==================== CRUD MANAGEMENT PAGES ====================
+
+@app.route('/crudManager')
+def manage():
+    """Main management page with tabs for flights, bookings, aircraft"""
+    return render_template('crudManager.html')
+
+# ==================== FLIGHTS CRUD ====================
+
+@app.route('/api/flights', methods=['GET'])
+def get_flights():
+    """Get all flights with pagination"""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        search = request.args.get('search', '', type=str)
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Count total flights
+        if search:
+            cursor.execute("""
+                SELECT COUNT(*) FROM flights 
+                WHERE flight_id LIKE ? OR departure_airport LIKE ? OR arrival_airport LIKE ?
+            """, (f'%{search}%', f'%{search}%', f'%{search}%'))
+        else:
+            cursor.execute("SELECT COUNT(*) FROM flights")
+        
+        total = cursor.fetchone()[0]
+        
+        # Get paginated flights
+        offset = (page - 1) * per_page
+        if search:
+            cursor.execute("""
+                SELECT * FROM flights 
+                WHERE flight_id LIKE ? OR departure_airport LIKE ? OR arrival_airport LIKE ?
+                ORDER BY scheduled_departure DESC
+                LIMIT ? OFFSET ?
+            """, (f'%{search}%', f'%{search}%', f'%{search}%', per_page, offset))
+        else:
+            cursor.execute("""
+                SELECT * FROM flights 
+                ORDER BY scheduled_departure DESC
+                LIMIT ? OFFSET ?
+            """, (per_page, offset))
+        
+        flights = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({
+            'flights': flights,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total + per_page - 1) // per_page
+        })
+    except Exception as e:
+        print(f"Error getting flights: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/flights/<int:flight_id>', methods=['GET'])
+def get_flight(flight_id):
+    """Get a single flight by ID"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM flights WHERE flight_id = ?", (flight_id,))
+        flight = cursor.fetchone()
+        conn.close()
+        
+        if flight:
+            return jsonify(dict(flight))
+        return jsonify({'error': 'Flight not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/flights', methods=['POST'])
+def create_flight():
+    """Create a new flight"""
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['flight_no', 'scheduled_departure', 'scheduled_arrival', 
+                          'departure_airport', 'arrival_airport', 'aircraft_code']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO flights (
+                flight_no, scheduled_departure, scheduled_arrival,
+                departure_airport, arrival_airport, status, aircraft_code,
+                actual_departure, actual_arrival
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data['flight_no'],
+            data['scheduled_departure'],
+            data['scheduled_arrival'],
+            data['departure_airport'],
+            data['arrival_airport'],
+            data.get('status', 'Scheduled'),
+            data['aircraft_code'],
+            data.get('actual_departure'),
+            data.get('actual_arrival')
+        ))
+        
+        flight_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'message': 'Flight created successfully',
+            'flight_id': flight_id
+        }), 201
+    except sqlite3.IntegrityError as e:
+        return jsonify({'error': f'Database integrity error: {str(e)}'}), 400
+    except Exception as e:
+        print(f"Error creating flight: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/flights/<int:flight_id>', methods=['PUT'])
+def update_flight(flight_id):
+    """Update an existing flight"""
+    try:
+        data = request.get_json()
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Build update query dynamically based on provided fields
+        update_fields = []
+        values = []
+        
+        allowed_fields = ['flight_no', 'scheduled_departure', 'scheduled_arrival',
+                         'departure_airport', 'arrival_airport', 'status', 'aircraft_code',
+                         'actual_departure', 'actual_arrival']
+        
+        for field in allowed_fields:
+            if field in data:
+                update_fields.append(f"{field} = ?")
+                values.append(data[field])
+        
+        if not update_fields:
+            return jsonify({'error': 'No fields to update'}), 400
+        
+        values.append(flight_id)
+        
+        cursor.execute(f"""
+            UPDATE flights 
+            SET {', '.join(update_fields)}
+            WHERE flight_id = ?
+        """, values)
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'error': 'Flight not found'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Flight updated successfully'})
+    except sqlite3.IntegrityError as e:
+        return jsonify({'error': f'Database integrity error: {str(e)}'}), 400
+    except Exception as e:
+        print(f"Error updating flight: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/flights/<int:flight_id>', methods=['DELETE'])
+def delete_flight(flight_id):
+    """Delete a flight"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if flight exists
+        cursor.execute("SELECT flight_id FROM flights WHERE flight_id = ?", (flight_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({'error': 'Flight not found'}), 404
+        
+        # Delete related records first (if any foreign key constraints)
+        cursor.execute("DELETE FROM ticket_flights WHERE flight_id = ?", (flight_id,))
+        cursor.execute("DELETE FROM boarding_passes WHERE flight_id = ?", (flight_id,))
+        
+        # Delete the flight
+        cursor.execute("DELETE FROM flights WHERE flight_id = ?", (flight_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Flight deleted successfully'})
+    except sqlite3.IntegrityError as e:
+        return jsonify({'error': f'Cannot delete flight: {str(e)}'}), 400
+    except Exception as e:
+        print(f"Error deleting flight: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ==================== BOOKINGS (TICKETS) CRUD ====================
+
+@app.route('/api/bookings', methods=['GET'])
+def get_bookings():
+    """Get all bookings/tickets"""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        search = request.args.get('search', '', type=str)
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Count total bookings
+        if search:
+            cursor.execute("""
+                SELECT COUNT(*) FROM tickets t
+                WHERE t.ticket_no LIKE ? OR t.passenger_name LIKE ?
+            """, (f'%{search}%', f'%{search}%'))
+        else:
+            cursor.execute("SELECT COUNT(*) FROM tickets")
+        
+        total = cursor.fetchone()[0]
+        
+        # Get paginated bookings
+        offset = (page - 1) * per_page
+        if search:
+            cursor.execute("""
+                SELECT * FROM tickets
+                WHERE ticket_no LIKE ? OR passenger_name LIKE ?
+                ORDER BY book_date DESC
+                LIMIT ? OFFSET ?
+            """, (f'%{search}%', f'%{search}%', per_page, offset))
+        else:
+            cursor.execute("""
+                SELECT * FROM tickets
+                ORDER BY book_date DESC
+                LIMIT ? OFFSET ?
+            """, (per_page, offset))
+        
+        bookings = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({
+            'bookings': bookings,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total + per_page - 1) // per_page
+        })
+    except Exception as e:
+        print(f"Error getting bookings: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bookings/<ticket_no>', methods=['GET'])
+def get_booking(ticket_no):
+    """Get a single booking by ticket number"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tickets WHERE ticket_no = ?", (ticket_no,))
+        booking = cursor.fetchone()
+        conn.close()
+        
+        if booking:
+            return jsonify(dict(booking))
+        return jsonify({'error': 'Booking not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bookings', methods=['POST'])
+def create_booking():
+    """Create a new booking/ticket"""
+    try:
+        data = request.get_json()
+        
+        required_fields = ['ticket_no', 'book_ref', 'passenger_id', 'passenger_name', 'contact_data']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Convert contact_data to JSON string if it's a dict
+        contact_data = data['contact_data']
+        if isinstance(contact_data, dict):
+            contact_data = json.dumps(contact_data)
+        
+        cursor.execute("""
+            INSERT INTO tickets (
+                ticket_no, book_ref, passenger_id, passenger_name, contact_data
+            ) VALUES (?, ?, ?, ?, ?)
+        """, (
+            data['ticket_no'],
+            data['book_ref'],
+            data['passenger_id'],
+            data['passenger_name'],
+            contact_data
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'message': 'Booking created successfully',
+            'ticket_no': data['ticket_no']
+        }), 201
+    except sqlite3.IntegrityError as e:
+        return jsonify({'error': f'Database integrity error: {str(e)}'}), 400
+    except Exception as e:
+        print(f"Error creating booking: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bookings/<ticket_no>', methods=['PUT'])
+def update_booking(ticket_no):
+    """Update an existing booking"""
+    try:
+        data = request.get_json()
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        update_fields = []
+        values = []
+        
+        allowed_fields = ['passenger_name', 'contact_data']
+        
+        for field in allowed_fields:
+            if field in data:
+                if field == 'contact_data' and isinstance(data[field], dict):
+                    values.append(json.dumps(data[field]))
+                else:
+                    values.append(data[field])
+                update_fields.append(f"{field} = ?")
+        
+        if not update_fields:
+            return jsonify({'error': 'No fields to update'}), 400
+        
+        values.append(ticket_no)
+        
+        cursor.execute(f"""
+            UPDATE tickets 
+            SET {', '.join(update_fields)}
+            WHERE ticket_no = ?
+        """, values)
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'error': 'Booking not found'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Booking updated successfully'})
+    except Exception as e:
+        print(f"Error updating booking: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bookings/<ticket_no>', methods=['DELETE'])
+def delete_booking(ticket_no):
+    """Delete a booking"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Delete related records
+        cursor.execute("DELETE FROM ticket_flights WHERE ticket_no = ?", (ticket_no,))
+        cursor.execute("DELETE FROM boarding_passes WHERE ticket_no = ?", (ticket_no,))
+        
+        # Delete the ticket
+        cursor.execute("DELETE FROM tickets WHERE ticket_no = ?", (ticket_no,))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'error': 'Booking not found'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Booking deleted successfully'})
+    except Exception as e:
+        print(f"Error deleting booking: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ==================== AIRCRAFT CRUD ====================
+
+@app.route('/api/aircraft', methods=['GET'])
+def get_aircraft():
+    """Get all aircraft"""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        search = request.args.get('search', '', type=str)
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Count total aircraft
+        if search:
+            cursor.execute("""
+                SELECT COUNT(*) FROM aircrafts_data 
+                WHERE aircraft_code LIKE ?
+            """, (f'%{search}%',))
+        else:
+            cursor.execute("SELECT COUNT(*) FROM aircrafts_data")
+        
+        total = cursor.fetchone()[0]
+        
+        # Get paginated aircraft
+        offset = (page - 1) * per_page
+        if search:
+            cursor.execute("""
+                SELECT * FROM aircrafts_data 
+                WHERE aircraft_code LIKE ?
+                LIMIT ? OFFSET ?
+            """, (f'%{search}%', per_page, offset))
+        else:
+            cursor.execute("""
+                SELECT * FROM aircrafts_data 
+                LIMIT ? OFFSET ?
+            """, (per_page, offset))
+        
+        aircraft_raw = cursor.fetchall()
+        
+        aircraft = []
+        for row in aircraft_raw:
+            aircraft_dict = dict(row)
+            aircraft_dict['model'] = extract_json_value(aircraft_dict.get('model'))
+            aircraft.append(aircraft_dict)
+        
+        conn.close()
+        
+        return jsonify({
+            'aircraft': aircraft,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total + per_page - 1) // per_page
+        })
+    except Exception as e:
+        print(f"Error getting aircraft: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/aircraft/<aircraft_code>', methods=['GET'])
+def get_single_aircraft(aircraft_code):
+    """Get a single aircraft by code"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM aircrafts_data WHERE aircraft_code = ?", (aircraft_code,))
+        aircraft = cursor.fetchone()
+        conn.close()
+        
+        if aircraft:
+            aircraft_dict = dict(aircraft)
+            aircraft_dict['model'] = extract_json_value(aircraft_dict.get('model'))
+            return jsonify(aircraft_dict)
+        return jsonify({'error': 'Aircraft not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/aircraft', methods=['POST'])
+def create_aircraft():
+    """Create a new aircraft"""
+    try:
+        data = request.get_json()
+        
+        required_fields = ['aircraft_code', 'model', 'range']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Convert model to JSON format if it's a string
+        model = data['model']
+        if isinstance(model, str):
+            model = json.dumps({"en": model})
+        elif isinstance(model, dict):
+            model = json.dumps(model)
+        
+        cursor.execute("""
+            INSERT INTO aircrafts_data (aircraft_code, model, range)
+            VALUES (?, ?, ?)
+        """, (
+            data['aircraft_code'],
+            model,
+            data['range']
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'message': 'Aircraft created successfully',
+            'aircraft_code': data['aircraft_code']
+        }), 201
+    except sqlite3.IntegrityError as e:
+        return jsonify({'error': f'Aircraft code already exists or integrity error: {str(e)}'}), 400
+    except Exception as e:
+        print(f"Error creating aircraft: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/aircraft/<aircraft_code>', methods=['PUT'])
+def update_aircraft(aircraft_code):
+    """Update an existing aircraft"""
+    try:
+        data = request.get_json()
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        update_fields = []
+        values = []
+        
+        if 'model' in data:
+            model = data['model']
+            if isinstance(model, str):
+                model = json.dumps({"en": model})
+            elif isinstance(model, dict):
+                model = json.dumps(model)
+            update_fields.append("model = ?")
+            values.append(model)
+        
+        if 'range' in data:
+            update_fields.append("range = ?")
+            values.append(data['range'])
+        
+        if not update_fields:
+            return jsonify({'error': 'No fields to update'}), 400
+        
+        values.append(aircraft_code)
+        
+        cursor.execute(f"""
+            UPDATE aircrafts_data 
+            SET {', '.join(update_fields)}
+            WHERE aircraft_code = ?
+        """, values)
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'error': 'Aircraft not found'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Aircraft updated successfully'})
+    except Exception as e:
+        print(f"Error updating aircraft: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/aircraft/<aircraft_code>', methods=['DELETE'])
+def delete_aircraft(aircraft_code):
+    """Delete an aircraft"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if aircraft is being used in flights
+        cursor.execute("SELECT COUNT(*) FROM flights WHERE aircraft_code = ?", (aircraft_code,))
+        flight_count = cursor.fetchone()[0]
+        
+        if flight_count > 0:
+            conn.close()
+            return jsonify({
+                'error': f'Cannot delete aircraft. It is assigned to {flight_count} flights.'
+            }), 400
+        
+        # Delete related seats
+        cursor.execute("DELETE FROM seats WHERE aircraft_code = ?", (aircraft_code,))
+        
+        # Delete the aircraft
+        cursor.execute("DELETE FROM aircrafts_data WHERE aircraft_code = ?", (aircraft_code,))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'error': 'Aircraft not found'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Aircraft deleted successfully'})
+    except Exception as e:
+        print(f"Error deleting aircraft: {e}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    # Initialize database views before starting the app
     try:
         init_db()
         print("\n" + "="*50)
