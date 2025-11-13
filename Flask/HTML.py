@@ -4,11 +4,15 @@ from flask import Flask, render_template, url_for, redirect, request, jsonify
 import sqlite3
 import json
 from datetime import datetime
+from flask_pymongo import PyMongo
+
+app = Flask(__name__)
+app.config['MONGO_URI'] = 'mongodb://localhost:27017/travel_nosql'
+mongo = PyMongo(app)
 
 # Add the path to the parent directory to the sys.path list
 sys.path.insert(1, "/".join(os.path.realpath(__file__).split("/")[0:-2]))
 
-app = Flask(__name__)
 
 # Database configuration
 SQLITE_DB = os.path.join(os.path.dirname(__file__), '..', 'travel.sqlite')
@@ -423,6 +427,60 @@ def advanced_metrics():
         'price_percentiles': price_percentiles,
         'top_routes': top_routes
     })
+
+from bson import ObjectId
+
+# CREATE booking
+@app.route('/add_booking', methods=['GET', 'POST'])
+def add_booking():
+    if request.method == 'POST':
+        booking = {
+            'book_date': request.form['book_date'],
+            'total_amount': int(request.form['total_amount']),
+            'tickets': [
+                {
+                    'ticket_no': request.form['ticket_no'],
+                    'passenger_id': request.form['passenger_id']
+                    # Add other ticket fields here
+                }
+            ]
+        }
+        mongo.db.bookings.insert_one(booking)
+        return render_template('add_booking.html', success=True)
+    return render_template('add_booking.html', success=False)
+
+
+
+# READ all bookings
+@app.route('/api/nosql/bookings', methods=['GET'])
+def get_nosql_bookings():
+    bookings = mongo.db.bookings.find()
+    output = []
+    for b in bookings:
+        b['_id'] = str(b['_id'])
+        output.append(b)
+    return jsonify(output)
+
+# UPDATE booking
+@app.route('/api/nosql/bookings/<booking_id>', methods=['PUT'])
+def update_nosql_booking(booking_id):
+    data = request.json
+    update_fields = {key: value for key, value in data.items() if key != '_id'}
+    result = mongo.db.bookings.update_one({'_id': ObjectId(booking_id)}, {'$set': update_fields})
+    if result.matched_count:
+        updated = mongo.db.bookings.find_one({'_id': ObjectId(booking_id)})
+        updated['_id'] = str(updated['_id'])
+        return jsonify(updated)
+    return jsonify({'error': 'Booking not found'}), 404
+
+# DELETE booking
+@app.route('/api/nosql/bookings/<booking_id>', methods=['DELETE'])
+def delete_nosql_booking(booking_id):
+    result = mongo.db.bookings.delete_one({'_id': ObjectId(booking_id)})
+    if result.deleted_count:
+        return jsonify({'message': 'Booking deleted'})
+    return jsonify({'error': 'Booking not found'}), 404
+
 
 if __name__ == '__main__':
     app.run(debug=True)
