@@ -63,6 +63,50 @@ def init_db():
                 f.departure_airport || ' -> ' || f.arrival_airport AS route
             FROM flights f;
         """)
+
+        # ==================== B+ TREE INDEXES ====================
+        print("Creating performance indexes (B+ Tree) on core tables...")
+
+        # 1. Index for Punctuality & Route Lookup (Used in flight_operations)
+        # Filters by status, and groups/sorts by route/arrival time.
+        cursor.execute("DROP INDEX IF EXISTS idx_flights_perf;")
+        cursor.execute("""
+            CREATE INDEX idx_flights_perf 
+            ON flights (status, scheduled_arrival, actual_arrival, departure_airport, arrival_airport);
+        """)
+
+        # Additional index for direct route querying (used in many GROUP BY statements)
+        cursor.execute("DROP INDEX IF EXISTS idx_flights_route_lookup;")
+        cursor.execute("""
+            CREATE INDEX idx_flights_route_lookup 
+            ON flights (departure_airport, arrival_airport);
+        """)
+
+        # 2. Index for Occupancy/Demand (Used in passenger_demand)
+        # Speeds up JOINs and COUNTs in load factor calculation.
+        cursor.execute("DROP INDEX IF EXISTS idx_seats_aircraft;")
+        cursor.execute("CREATE INDEX idx_seats_aircraft ON seats (aircraft_code);")
+
+        cursor.execute("DROP INDEX IF EXISTS idx_boarding_flight;")
+        cursor.execute("CREATE INDEX idx_boarding_flight ON boarding_passes (flight_id);")
+
+        # 3. Index for Revenue Analysis (Used in revenue_analysis)
+        # Speeds up JOINs, SUM, and GROUP BY for ticket amounts and fare conditions.
+        cursor.execute("DROP INDEX IF EXISTS idx_ticketflights_revenue;")
+        cursor.execute("""
+            CREATE INDEX idx_ticketflights_revenue 
+            ON ticket_flights (flight_id, fare_conditions, amount);
+        """)
+
+        # 4. Index for Resource Planning (Used in resource_planning)
+        # Crucial for grouping flights by aircraft, and destination arrivals.
+        cursor.execute("DROP INDEX IF EXISTS idx_flights_aircraft_arrival;")
+        cursor.execute("""
+            CREATE INDEX idx_flights_aircraft_arrival 
+            ON flights (aircraft_code, arrival_airport);
+        """)
+        # ==================================================================
+
         conn.commit()
         conn.close()
         print("[OK] Database views initialized successfully")
