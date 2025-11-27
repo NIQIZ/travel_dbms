@@ -7,9 +7,11 @@ from datetime import datetime
 from flask_pymongo import PyMongo
 from bson import ObjectId
 
+
 app = Flask(__name__)
 app.config['MONGO_URI'] = 'mongodb://localhost:27017/travel_nosql'
 mongo = PyMongo(app)
+
 
 # Add the path to the parent directory to the sys.path list
 sys.path.insert(1, "/".join(os.path.realpath(__file__).split("/")[0:-2]))

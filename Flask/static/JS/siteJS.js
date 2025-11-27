@@ -543,31 +543,87 @@ function createRevenueClassRouteChart(data) {
 // 8. Aircraft Type by Route
 function createAircraftRouteChart(data) {
     if(!data) data = [];
+
+    // 1. We find the highest number of flights to calculate the color intensity
+    // (If the max is 50, then 50 flights = Dark Orange, 1 flight = Light Orange)
+    const counts = data.map(d => d.total_flights_on_route);
+    const maxFlights = Math.max(...counts);
+
+    // 2. We need to know how many columns (Routes) and rows (Planes) we have
+    // so we can calculate the size of the squares.
+    const uniqueRoutes = [...new Set(data.map(d => d.route))];
+    const uniquePlanes = [...new Set(data.map(d => d.aircraft_code))];
+
     createOrUpdateChart('aircraftRouteChart', {
-        type: 'bar',
+        type: 'matrix', // <--- This requires the script from Step 1
         data: {
-            labels: data.map(d => `${d.route} (${d.aircraft_code})`),
             datasets: [{
-                label: 'Total Flights',
-                data: data.map(d => d.total_flights_on_route),
-                backgroundColor: '#FF9800',
+                label: 'Flight Density',
+                data: data.map(d => ({
+                    x: d.route,               // Column
+                    y: d.aircraft_code,       // Row
+                    v: d.total_flights_on_route // Value (Heat)
+                })),
+                
+                // 3. The Color Logic
+                backgroundColor: function(context) {
+                    const value = context.dataset.data[context.dataIndex].v;
+                    // Calculate transparency (alpha). 
+                    // We add 0.15 so even small numbers are visible.
+                    const alpha = (value / maxFlights) + 0.15;
+                    return `rgba(255, 152, 0, ${alpha})`; // Orange Color
+                },
+                
+                borderColor: 'rgba(200, 200, 200, 0.5)',
+                borderWidth: 1,
+                
+                // 4. Square Size Logic (The Math)
+                // This calculates: (Chart Width / Number of Routes) - 1 pixel for spacing
+                width: ({chart}) => (chart.chartArea || {}).width / uniqueRoutes.length - 1,
+                height: ({chart}) => (chart.chartArea || {}).height / uniquePlanes.length - 1
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            scales: {
-                y: { beginAtZero: true },
-                x: {
-                    ticks: {
-                        maxRotation: 90,
-                        minRotation: 90,
-                        font: { size: 8 }
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: () => '', // No title
+                        label: function(context) {
+                            const d = context.raw;
+                            return `${d.y} on ${d.x}: ${d.v} flights`;
+                        }
                     }
                 }
             },
-            plugins: {
-                legend: { display: false }
+            scales: {
+                x: {
+                    type: 'category', // IMPORTANT: Tells the chart to use Text Labels
+                    labels: uniqueRoutes,
+                    ticks: {
+                        display: true,
+                        maxRotation: 90,
+                        minRotation: 90,
+                        font: { size: 9 }
+                    },
+                    grid: {
+                        display: false // Hide grid lines (the squares are the grid!)
+                    }
+                },
+                y: {
+                    type: 'category', // IMPORTANT: Tells the chart to use Text Labels
+                    labels: uniquePlanes,
+                    offset: true,
+                    ticks: {
+                        display: true,
+                        font: { size: 10 }
+                    },
+                    grid: {
+                        display: false
+                    }
+                }
             }
         }
     });
@@ -605,42 +661,69 @@ function createDestinationsChart(data) {
 // 10. Top 10 Planes with Most Mileage
 function createUtilizationChart(data) {
     if(!data) data = [];
+
+    const backgroundColors = [
+        'rgba(255, 99, 132, 0.7)',   // Pink
+        'rgba(54, 162, 235, 0.7)',   // Blue
+        'rgba(255, 206, 86, 0.7)',   // Yellow
+        'rgba(75, 192, 192, 0.7)',   // Teal
+        'rgba(153, 102, 255, 0.7)',  // Purple
+        'rgba(255, 159, 64, 0.7)',   // Orange
+        'rgba(199, 199, 199, 0.7)',  // Grey
+        'rgba(83, 102, 255, 0.7)',   // Indigo
+        'rgba(40, 159, 64, 0.7)',    // Green
+        'rgba(210, 80, 80, 0.7)'     // Red
+    ];
+
     createOrUpdateChart('utilizationChart', {
-        type: 'bar',
+        type: 'polarArea',  // <--- This is the magic change! "Pizza Mode"
         data: {
             labels: data.map(d => `${d.aircraft_code} (${d.aircraft_model})`),
             datasets: [{
                 label: 'Total Mileage',
                 data: data.map(d => d.total_mileage),
-                backgroundColor: '#9C27B0',
+                backgroundColor: backgroundColors, // Use our rainbow colors
+                borderWidth: 1
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            layout: {
+                padding: 20 // Gives the chart a little breathing room
+            },
             scales: {
-                y: {
-                    beginAtZero: true,
+                r: {
+                    // This controls the spiderweb lines
+                    grid: {
+                        color: 'rgba(200, 200, 200, 0.3)' 
+                    },
+                    // This controls the numbers (0k, 2000k, 4000k)
                     ticks: {
-                        callback: function(value) {
-                            return value.toLocaleString() + ' miles';
-                        }
-                    }
-                },
-                x: {
-                    ticks: {
-                        maxRotation: 45,
-                        minRotation: 45,
-                        font: { size: 9 }
+                        display: false // <--- MAGIC FIX: This hides the messy numbers!
+                    },
+                    // This controls the labels around the edge (if you had any)
+                    pointLabels: {
+                        display: false 
                     }
                 }
             },
             plugins: {
-                legend: { display: false },
+                legend: { 
+                    display: true, 
+                    position: 'right', // Keeps your list on the side
+                    labels: { 
+                        font: { size: 11 },
+                        padding: 20
+                    }
+                },
                 tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(0,0,0,0.8)',
                     callbacks: {
+                        // This makes the pop-up box say "12,000 miles" nicely
                         label: function(context) {
-                            return 'Total Mileage: ' + context.parsed.y.toLocaleString() + ' miles';
+                            return ' ' + context.label + ': ' + context.parsed.r.toLocaleString() + ' miles';
                         }
                     }
                 }
