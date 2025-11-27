@@ -17,6 +17,7 @@
     .manage-header h1 {
         color: #667eea;
         margin-bottom: 10px;
+        transition: color 0.3s ease;
     }
     
     .tab-buttons {
@@ -365,11 +366,20 @@
 {% block body %}
 <div class="manage-container">
     <div class="manage-header">
-        <h1>Database Management</h1>
+        <h1 id="page-title">Database Management</h1>
+        
+        <div class="db-toggle-container">
+            <span class="toggle-label" id="crud-label-sql" style="color: #2196F3;">SQL</span>
+            <label class="switch">
+                <input type="checkbox" id="crudToggle" onchange="toggleCrudSource()">
+                <span class="slider"></span>
+            </label>
+            <span class="toggle-label" id="crud-label-nosql" style="color: #aaa;">NoSQL</span>
+        </div>
+
         <p>Create, Read, Update, and Delete records from your travel database</p>
     </div>
     
-    <!-- Tab Buttons -->
     <div class="tab-buttons">
         <button class="tab-btn active" onclick="switchTab('flights')">
             ✈️ Flights
@@ -382,7 +392,6 @@
         </button>
     </div>
     
-    <!-- Flights Tab -->
     <div id="flights-tab" class="tab-content active">
         <div class="controls">
             <div class="search-box">
@@ -418,7 +427,6 @@
         <div class="pagination" id="flights-pagination"></div>
     </div>
     
-    <!-- Bookings Tab -->
     <div id="bookings-tab" class="tab-content">
         <div class="controls">
             <div class="search-box">
@@ -453,7 +461,6 @@
         <div class="pagination" id="bookings-pagination"></div>
     </div>
     
-    <!-- Aircraft Tab -->
     <div id="aircraft-tab" class="tab-content">
         <div class="controls">
             <div class="search-box">
@@ -487,7 +494,6 @@
     </div>
 </div>
 
-<!-- Create/Edit Modal -->
 <div id="recordModal" class="modal">
     <div class="modal-content">
         <div class="modal-header">

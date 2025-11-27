@@ -2,6 +2,33 @@ let currentTab = 'flights';
 let currentPage = 1;
 let currentMode = 'create'; // 'create' or 'edit'
 let currentRecordId = null;
+let crudUseNoSQL = false; // State for toggle
+
+// Toggle Source Function
+function toggleCrudSource() {
+    const toggle = document.getElementById('crudToggle');
+    crudUseNoSQL = toggle.checked;
+    
+    // Update UI visuals
+    const title = document.getElementById('page-title');
+    const labelSql = document.getElementById('crud-label-sql');
+    const labelNoSql = document.getElementById('crud-label-nosql');
+    
+    if (crudUseNoSQL) {
+        title.textContent = "Database Management (MongoDB)";
+        title.style.color = "#2E7D32";
+        labelSql.style.color = "#aaa";
+        labelNoSql.style.color = "#4CAF50";
+    } else {
+        title.textContent = "Database Management (SQLite)";
+        title.style.color = "#667eea";
+        labelSql.style.color = "#2196F3";
+        labelNoSql.style.color = "#aaa";
+    }
+    
+    currentPage = 1;
+    loadData();
+}
 
 // Tab switching
 function switchTab(tab) {
@@ -22,7 +49,8 @@ function switchTab(tab) {
 
 // Load data based on current tab
 async function loadData(search = '') {
-    const endpoint = `/api/${currentTab}`;
+    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
+    const endpoint = `${prefix}/${currentTab}`;
     const params = new URLSearchParams({
         page: currentPage,
         per_page: 20,
@@ -40,6 +68,7 @@ async function loadData(search = '') {
             renderBookings(data.bookings);
             renderPagination('bookings', data);
         } else if (currentTab === 'aircraft') {
+            // Note: API returns 'aircraft' key
             renderAircraft(data.aircraft);
             renderPagination('aircraft', data);
         }
@@ -53,7 +82,7 @@ async function loadData(search = '') {
 function renderFlights(flights) {
     const tbody = document.getElementById('flights-tbody');
     
-    if (flights.length === 0) {
+    if (!flights || flights.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7" class="loading">No flights found</td></tr>';
         return;
     }
@@ -68,8 +97,8 @@ function renderFlights(flights) {
             <td>${flight.aircraft_code}</td>
             <td>
                 <div class="action-buttons">
-                    <button class="btn btn-warning btn-sm" onclick="editFlight(${flight.flight_id})">✏️ Edit</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteFlight(${flight.flight_id})">🗑️ Delete</button>
+                    <button class="btn btn-warning btn-sm" onclick="editFlight('${flight.flight_id}')">✏️ Edit</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteFlight('${flight.flight_id}')">🗑️ Delete</button>
                 </div>
             </td>
         </tr>
@@ -80,7 +109,7 @@ function renderFlights(flights) {
 function renderBookings(bookings) {
     const tbody = document.getElementById('bookings-tbody');
     
-    if (bookings.length === 0) {
+    if (!bookings || bookings.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" class="loading">No bookings found</td></tr>';
         return;
     }
@@ -106,7 +135,7 @@ function renderBookings(bookings) {
 function renderAircraft(aircraft) {
     const tbody = document.getElementById('aircraft-tbody');
     
-    if (aircraft.length === 0) {
+    if (!aircraft || aircraft.length === 0) {
         tbody.innerHTML = '<tr><td colspan="4" class="loading">No aircraft found</td></tr>';
         return;
     }
@@ -115,7 +144,7 @@ function renderAircraft(aircraft) {
         <tr>
             <td>${ac.aircraft_code}</td>
             <td>${ac.model}</td>
-            <td>${ac.range.toLocaleString()}</td>
+            <td>${(ac.range || 0).toLocaleString()}</td>
             <td>
                 <div class="action-buttons">
                     <button class="btn btn-warning btn-sm" onclick="editAircraft('${ac.aircraft_code}')">✏️ Edit</button>
@@ -182,8 +211,9 @@ function closeModal() {
 
 // CRUD Operations - Flights
 async function editFlight(flightId) {
+    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
     try {
-        const response = await fetch(`/api/flights/${flightId}`);
+        const response = await fetch(`${prefix}/flights/${flightId}`);
         const flight = await response.json();
         
         currentMode = 'edit';
@@ -200,9 +230,10 @@ async function editFlight(flightId) {
 
 async function deleteFlight(flightId) {
     if (!confirm(`Are you sure you want to delete flight ${flightId}?`)) return;
+    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
     
     try {
-        const response = await fetch(`/api/flights/${flightId}`, {
+        const response = await fetch(`${prefix}/flights/${flightId}`, {
             method: 'DELETE'
         });
         
@@ -221,8 +252,9 @@ async function deleteFlight(flightId) {
 
 // CRUD Operations - Bookings
 async function editBooking(ticketNo) {
+    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
     try {
-        const response = await fetch(`/api/bookings/${ticketNo}`);
+        const response = await fetch(`${prefix}/bookings/${ticketNo}`);
         const booking = await response.json();
         
         currentMode = 'edit';
@@ -239,9 +271,10 @@ async function editBooking(ticketNo) {
 
 async function deleteBooking(ticketNo) {
     if (!confirm(`Are you sure you want to delete booking ${ticketNo}?`)) return;
+    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
     
     try {
-        const response = await fetch(`/api/bookings/${ticketNo}`, {
+        const response = await fetch(`${prefix}/bookings/${ticketNo}`, {
             method: 'DELETE'
         });
         
@@ -260,8 +293,9 @@ async function deleteBooking(ticketNo) {
 
 // CRUD Operations - Aircraft
 async function editAircraft(aircraftCode) {
+    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
     try {
-        const response = await fetch(`/api/aircraft/${aircraftCode}`);
+        const response = await fetch(`${prefix}/aircraft/${aircraftCode}`);
         const aircraft = await response.json();
         
         currentMode = 'edit';
@@ -278,9 +312,10 @@ async function editAircraft(aircraftCode) {
 
 async function deleteAircraft(aircraftCode) {
     if (!confirm(`Are you sure you want to delete aircraft ${aircraftCode}?`)) return;
+    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
     
     try {
-        const response = await fetch(`/api/aircraft/${aircraftCode}`, {
+        const response = await fetch(`${prefix}/aircraft/${aircraftCode}`, {
             method: 'DELETE'
         });
         
@@ -301,6 +336,7 @@ async function deleteAircraft(aircraftCode) {
 async function submitForm(type) {
     const formData = new FormData(document.getElementById('record-form'));
     const data = Object.fromEntries(formData.entries());
+    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
     
     // Convert contact_data to JSON if it's a booking
     if (type === 'booking' && data.contact_email) {
@@ -313,18 +349,16 @@ async function submitForm(type) {
     }
     
     let url, method;
-    
+    let endpointType = type;
+    if(type === 'flight') endpointType = 'flights';
+    if(type === 'booking') endpointType = 'bookings';
+    // aircraft is singular in API but plural in some contexts, keeping 'aircraft' per original logic
+
     if (currentMode === 'create') {
-        url = `/api/${type}s`;
+        url = `${prefix}/${endpointType}`;
         method = 'POST';
     } else {
-        if (type === 'flight') {
-            url = `/api/flights/${currentRecordId}`;
-        } else if (type === 'booking') {
-            url = `/api/bookings/${currentRecordId}`;
-        } else if (type === 'aircraft') {
-            url = `/api/aircraft/${currentRecordId}`;
-        }
+        url = `${prefix}/${endpointType}/${currentRecordId}`;
         method = 'PUT';
     }
     
@@ -340,14 +374,14 @@ async function submitForm(type) {
         const result = await response.json();
         
         if (response.ok) {
-            showMessage(`${type}s`, result.message, 'success');
+            showMessage(`${endpointType}`, result.message, 'success');
             closeModal();
             loadData();
         } else {
-            showMessage(`${type}s`, result.error, 'error');
+            showMessage(`${endpointType}`, result.error, 'error');
         }
     } catch (error) {
-        showMessage(`${type}s`, `Error saving ${type}`, 'error');
+        showMessage(`${endpointType}`, `Error saving ${type}`, 'error');
     }
 }
 
@@ -420,7 +454,7 @@ function getBookingForm(booking) {
     let email = '', phone = '';
     if (booking?.contact_data) {
         try {
-            const contact = JSON.parse(booking.contact_data);
+            const contact = typeof booking.contact_data === 'string' ? JSON.parse(booking.contact_data) : booking.contact_data;
             email = contact.email || '';
             phone = contact.phone || '';
         } catch (e) {}
@@ -490,10 +524,12 @@ function getAircraftForm(aircraft) {
 // Utility functions
 function showMessage(section, message, type) {
     const messageDiv = document.getElementById(`${section}-message`);
-    messageDiv.innerHTML = `<div class="${type}-message">${message}</div>`;
-    setTimeout(() => {
-        messageDiv.innerHTML = '';
-    }, 5000);
+    if(messageDiv) {
+        messageDiv.innerHTML = `<div class="${type}-message">${message}</div>`;
+        setTimeout(() => {
+            messageDiv.innerHTML = '';
+        }, 5000);
+    }
 }
 
 function formatDateTime(datetime) {
@@ -520,7 +556,7 @@ function formatDateTimeLocal(datetime) {
 
 function formatContact(contactData) {
     try {
-        const contact = JSON.parse(contactData);
+        const contact = typeof contactData === 'string' ? JSON.parse(contactData) : contactData;
         return contact.email || contact.phone || '-';
     } catch {
         return '-';

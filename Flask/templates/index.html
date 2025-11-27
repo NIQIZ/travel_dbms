@@ -2,13 +2,11 @@
 
 {% block head %}
 <title>Airlines Database - Home</title>
-<!-- Chart.js for visualizations -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1"></script>
 {% endblock %}
 
 {% block body %}
-<!-- Hero Section with Background Image -->
 <section class="hero-section" id="hero">
     <div class="container" id="homeContainer">
         <div class="row">
@@ -47,23 +45,29 @@
         </div>
     </div>
     
-    <!-- Scroll indicator at the bottom -->
     <div class="scroll-indicator" onclick="document.getElementById('dashboard').scrollIntoView({behavior: 'smooth'})">
         <i class="fas fa-chevron-down"></i>
         <p style="margin-top: 10px; font-size: 0.9rem;">Scroll for Dashboard</p>
     </div>
 </section>
 
-<!-- Dashboard Section -->
 <section class="dashboard-section" id="dashboard">
     <div class="container">
-        <!-- Dashboard Header -->
         <div class="dashboard-header">
-            <h2>Relational Database Analytics</h2>
+            <h2 id="dashboard-title">Relational Database Analytics</h2>
+            
+            <div class="db-toggle-container">
+                <span class="toggle-label" id="db-label-sql" style="color: #2196F3;">SQL</span>
+                <label class="switch">
+                    <input type="checkbox" id="dashboardToggle" onchange="toggleDashboardSource()">
+                    <span class="slider"></span>
+                </label>
+                <span class="toggle-label" id="db-label-nosql" style="color: #aaa;">NoSQL</span>
+            </div>
+
             <p>Real-time insights from your flight operations data</p>
         </div>
         
-        <!-- Key Metrics Row -->
         <div class="row metrics-row" id="keyMetrics">
             <div class="col-md-3">
                 <div class="metric-card">
@@ -95,7 +99,6 @@
             </div>
         </div>
         
-        <!-- Charts Row 1: Flight Operations -->
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">
@@ -115,7 +118,6 @@
             </div>
         </div>
         
-        <!-- Charts Row 2: Occupancy & Market Share -->
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">
@@ -135,7 +137,6 @@
             </div>
         </div>
         
-        <!-- Charts Row 3: Least Busy & Most Profitable -->
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">
@@ -155,7 +156,6 @@
             </div>
         </div>
         
-        <!-- Charts Row 4: Least Profitable & Revenue by Class -->
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">
@@ -175,7 +175,6 @@
             </div>
         </div>
         
-        <!-- Charts Row 5: Revenue Analysis -->
         <div class="row">
             <div class="col-md-12">
                 <div class="chart-card">
@@ -187,7 +186,6 @@
             </div>
         </div>
         
-        <!-- Charts Row 6: Aircraft & Destinations -->
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">
@@ -207,7 +205,6 @@
             </div>
         </div>
         
-        <!-- Charts Row 7: Aircraft Utilization -->
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">

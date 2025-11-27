@@ -1,4 +1,7 @@
-﻿// Tab functionality
+﻿// Global state for Database Toggle
+let useNoSQL = false;
+
+// Tab functionality
 function openOptions(optionName, elmnt) {
     var i, tabcontent, tablinks;
     tabcontent = document.getElementsByClassName("tabcontent");
@@ -30,6 +33,32 @@ function createOrUpdateChart(canvasId, config) {
     }
 }
 
+// Toggle Source Function
+function toggleDashboardSource() {
+    const toggle = document.getElementById('dashboardToggle');
+    useNoSQL = toggle.checked;
+    
+    // Update UI visuals
+    const title = document.getElementById('dashboard-title');
+    const labelSql = document.getElementById('db-label-sql');
+    const labelNoSql = document.getElementById('db-label-nosql');
+    
+    if (useNoSQL) {
+        title.textContent = "NoSQL Database Analytics (MongoDB)";
+        title.style.color = "#2E7D32"; // Green shade
+        labelSql.style.color = "#aaa";
+        labelNoSql.style.color = "#4CAF50";
+    } else {
+        title.textContent = "Relational Database Analytics (SQLite)";
+        title.style.color = "#333";
+        labelSql.style.color = "#2196F3";
+        labelNoSql.style.color = "#aaa";
+    }
+    
+    // Reload data
+    loadDashboardData();
+}
+
 // Initialize all charts when page loads
 document.addEventListener('DOMContentLoaded', function() {
     loadDashboardData();
@@ -37,25 +66,28 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function loadDashboardData() {
     try {
+        // Determine API prefix based on toggle
+        const prefix = useNoSQL ? '/api/nosql' : '/api';
+        
         // Load all data in parallel
         const [flightOps, routePerf, passengerDemand, revenue, resources] = await Promise.all([
-            fetch('/api/flight-operations').then(r => {
+            fetch(`${prefix}/flight-operations`).then(r => {
                 if (!r.ok) throw new Error(`Flight operations failed: ${r.statusText}`);
                 return r.json();
             }),
-            fetch('/api/route-performance').then(r => {
+            fetch(`${prefix}/route-performance`).then(r => {
                 if (!r.ok) throw new Error(`Route performance failed: ${r.statusText}`);
                 return r.json();
             }),
-            fetch('/api/passenger-demand').then(r => {
+            fetch(`${prefix}/passenger-demand`).then(r => {
                 if (!r.ok) throw new Error(`Passenger demand failed: ${r.statusText}`);
                 return r.json();
             }),
-            fetch('/api/revenue-analysis').then(r => {
+            fetch(`${prefix}/revenue-analysis`).then(r => {
                 if (!r.ok) throw new Error(`Revenue analysis failed: ${r.statusText}`);
                 return r.json();
             }),
-            fetch('/api/resource-planning').then(r => {
+            fetch(`${prefix}/resource-planning`).then(r => {
                 if (!r.ok) throw new Error(`Resource planning failed: ${r.statusText}`);
                 return r.json();
             })
@@ -83,20 +115,26 @@ async function loadDashboardData() {
         
     } catch (error) {
         console.error('Error loading dashboard data:', error);
-        alert(`Error loading dashboard data: ${error.message}\nPlease check the browser console for details.`);
+        // We do not alert here to avoid spamming user on switch, just log
     }
 }
 
 function updateKeyMetrics(overview) {
-    document.getElementById('totalFlights').textContent = overview.total_flights.toLocaleString();
-    const ontimeRate = ((overview.ontime_flights / overview.total_flights) * 100).toFixed(1);
+    document.getElementById('totalFlights').textContent = (overview.total_flights || 0).toLocaleString();
+    
+    let ontimeRate = 0;
+    if(overview.total_flights > 0) {
+        ontimeRate = ((overview.ontime_flights / overview.total_flights) * 100).toFixed(1);
+    }
+    
     document.getElementById('ontimeRate').textContent = ontimeRate + '%';
     document.getElementById('avgDelay').textContent = overview.avg_delay_minutes || 0;
-    document.getElementById('cancellations').textContent = overview.cancelled_flights.toLocaleString();
+    document.getElementById('cancellations').textContent = (overview.cancelled_flights || 0).toLocaleString();
 }
 
 // 1. Top 5 Least Punctual Routes
 function createPunctualChart(data) {
+    if(!data) data = [];
     createOrUpdateChart('punctualChart', {
         type: 'bar',
         data: {
@@ -131,6 +169,7 @@ function createPunctualChart(data) {
 
 // 5. Top 10 Routes by Flight Volume
 function createRoutesChart(data) {
+    if(!data) data = [];
     createOrUpdateChart('routesChart', {
         type: 'bar',
         data: {
@@ -165,6 +204,7 @@ function createRoutesChart(data) {
 
 // 2. Top 10 Routes by Average Occupancy Rate
 function createOccupancyChart(data) {
+    if(!data) data = [];
     createOrUpdateChart('occupancyChart', {
         type: 'bar',
         data: {
@@ -197,6 +237,7 @@ function createOccupancyChart(data) {
 
 // 3. Busiest Routes by Market Share % - TRUE GRID HEATMAP
 function createMarketShareChart(data) {
+    if(!data) data = [];
     // Sort data by market share
     const sortedData = [...data].sort((a, b) => b.market_share_percent - a.market_share_percent);
     
@@ -209,8 +250,11 @@ function createMarketShareChart(data) {
         tickets: d.total_tickets_sold
     }));
     
-    const maxShare = Math.max(...sortedData.map(d => d.market_share_percent));
-    const minShare = Math.min(...sortedData.map(d => d.market_share_percent));
+    let maxShare = 0, minShare = 0;
+    if(sortedData.length > 0) {
+        maxShare = Math.max(...sortedData.map(d => d.market_share_percent));
+        minShare = Math.min(...sortedData.map(d => d.market_share_percent));
+    }
     
     createOrUpdateChart('marketShareChart', {
         type: 'matrix',
@@ -221,7 +265,7 @@ function createMarketShareChart(data) {
                 backgroundColor(context) {
                     if (!context.dataset.data[context.dataIndex]) return 'rgba(33, 150, 243, 0)';
                     const value = context.dataset.data[context.dataIndex].v;
-                    const intensity = (value - minShare) / (maxShare - minShare);
+                    const intensity = (value - minShare) / (maxShare - minShare || 1);
                     const r = Math.round(33 + (200 - 33) * (1 - intensity));
                     const g = Math.round(150 + (230 - 150) * (1 - intensity));
                     const b = 243;
@@ -231,7 +275,7 @@ function createMarketShareChart(data) {
                 borderWidth: 2,
                 width: ({chart}) => (chart.chartArea || {}).width * 0.8,
                 height: ({chart}) => {
-                    const height = ((chart.chartArea || {}).height / sortedData.length) - 4;
+                    const height = ((chart.chartArea || {}).height / (sortedData.length || 1)) - 4;
                     return Math.max(height, 25);
                 }
             }]
@@ -251,7 +295,7 @@ function createMarketShareChart(data) {
                             return [
                                 `Route: ${v.route}`,
                                 `Market Share: ${v.v}%`,
-                                `Tickets Sold: ${v.tickets.toLocaleString()}`
+                                `Tickets Sold: ${v.tickets ? v.tickets.toLocaleString() : 0}`
                             ];
                         }
                     }
@@ -291,6 +335,7 @@ function createMarketShareChart(data) {
 
 // 4. 10 Least Busy Routes
 function createLeastBusyChart(data) {
+    if(!data) data = [];
     createOrUpdateChart('leastBusyChart', {
         type: 'bar',
         data: {
@@ -329,6 +374,9 @@ function createLeastBusyChart(data) {
 
 // 6. Top 3 Most & Least Profitable Routes - SPLIT INTO TWO CHARTS
 function createProfitableRoutesChart(topRoutes, leastRoutes) {
+    if(!topRoutes) topRoutes = [];
+    if(!leastRoutes) leastRoutes = [];
+    
     // Top 3 Most Profitable
     createOrUpdateChart('profitableRoutesChart', {
         type: 'bar',
@@ -420,6 +468,7 @@ function createProfitableRoutesChart(topRoutes, leastRoutes) {
 
 // 7a. Revenue by Fare Class
 function createRevenueClassChart(data) {
+    if(!data) data = [];
     createOrUpdateChart('revenueClassChart', {
         type: 'pie',
         data: {
@@ -453,6 +502,7 @@ function createRevenueClassChart(data) {
 
 // 7b. Revenue by Fare Class & Route
 function createRevenueClassRouteChart(data) {
+    if(!data) data = [];
     createOrUpdateChart('revenueClassRouteChart', {
         type: 'bar',
         data: {
@@ -492,6 +542,7 @@ function createRevenueClassRouteChart(data) {
 
 // 8. Aircraft Type by Route
 function createAircraftRouteChart(data) {
+    if(!data) data = [];
     createOrUpdateChart('aircraftRouteChart', {
         type: 'bar',
         data: {
@@ -524,6 +575,7 @@ function createAircraftRouteChart(data) {
 
 // 9. Top 3 Most Visited Destinations
 function createDestinationsChart(data) {
+    if(!data) data = [];
     createOrUpdateChart('destinationsChart', {
         type: 'doughnut',
         data: {
@@ -552,6 +604,7 @@ function createDestinationsChart(data) {
 
 // 10. Top 10 Planes with Most Mileage
 function createUtilizationChart(data) {
+    if(!data) data = [];
     createOrUpdateChart('utilizationChart', {
         type: 'bar',
         data: {
@@ -596,23 +649,32 @@ function createUtilizationChart(data) {
     });
 }
 
-// NEW: Initialize aircraft filter dropdown
+// Initialize aircraft filter dropdown
 function initializeAircraftFilter(aircraftList) {
     const filterSelect = document.getElementById('aircraftFilter');
     
     // Clear loading option
     filterSelect.innerHTML = '';
     
+    if(!aircraftList || aircraftList.length === 0) {
+        const option = document.createElement('option');
+        option.text = "No Aircraft Data";
+        filterSelect.appendChild(option);
+        return;
+    }
+    
     // Add options
     aircraftList.forEach(aircraft => {
         const option = document.createElement('option');
         option.value = aircraft.aircraft_code;
-        option.textContent = `${aircraft.aircraft_code} - ${aircraft.aircraft_model} (${aircraft.flight_count} flights)`;
+        option.textContent = `${aircraft.aircraft_code} - ${aircraft.aircraft_model}`;
         filterSelect.appendChild(option);
     });
     
-    // Set default to SU9 (most utilized)
-    filterSelect.value = 'SU9';
+    // Set default if exists
+    if(aircraftList.length > 0) {
+        filterSelect.value = aircraftList[0].aircraft_code;
+    }
     
     // Add change event listener
     filterSelect.addEventListener('change', async function() {
@@ -621,13 +683,17 @@ function initializeAircraftFilter(aircraftList) {
     });
 }
 
-// NEW: Load routes for selected aircraft
+// Load routes for selected aircraft
 async function loadAircraftRoutes(aircraftCode) {
+    if(!aircraftCode) return;
     const tbody = document.getElementById('su9RoutesBody');
     tbody.innerHTML = '<tr><td colspan="4" class="text-center">Loading...</td></tr>';
     
     try {
-        const response = await fetch(`/api/aircraft-routes/${aircraftCode}`);
+        const prefix = useNoSQL ? '/api/nosql' : '/api';
+        // Note: For simplicity, assuming endpoint handles aircraft routes logic or we disable it for NoSQL if complex
+        // Here we attempt to fetch it
+        const response = await fetch(`${prefix}/aircraft-routes/${aircraftCode}`);
         if (!response.ok) throw new Error(`Failed to load routes: ${response.statusText}`);
         
         const data = await response.json();
@@ -644,7 +710,7 @@ function createSU9RoutesTable(data) {
     const tbody = document.getElementById('su9RoutesBody');
     tbody.innerHTML = '';
     
-    if (data.length === 0) {
+    if (!data || data.length === 0) {
         tbody.innerHTML = '<tr><td colspan="4" class="text-center">No data available for this aircraft</td></tr>';
         return;
     }

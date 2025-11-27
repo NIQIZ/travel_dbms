@@ -1,12 +1,14 @@
 import sqlite3
 from pymongo import MongoClient
-from datetime import datetime
 import sys
+import json
 
+# Ensure UTF-8 encoding
 sys.stdout.reconfigure(encoding='utf-8')
 
 # Connect to SQLite
 conn = sqlite3.connect('travel.sqlite')
+conn.row_factory = sqlite3.Row # Access columns by name
 cursor = conn.cursor()
 
 # Connect to MongoDB
@@ -14,269 +16,193 @@ mongo_client = MongoClient('mongodb://localhost:27017/')
 mongo_db = mongo_client['travel_nosql']
 
 # Clear existing collections
+print("Cleaning old collections...")
 mongo_db.bookings.drop()
 mongo_db.flights.drop()
 mongo_db.aircrafts.drop()
 mongo_db.airports.drop()
 
-print("=== MIGRATING TO MONGODB WITH DENORMALIZATION ===\n")
+print("=== STARTING OPTIMIZED MIGRATION ===\n")
+
+# Helper to parse JSON strings from SQLite
+def parse_json(data):
+    try:
+        if not data: return "Unknown"
+        loaded = json.loads(data)
+        if isinstance(loaded, dict) and 'en' in loaded:
+            return loaded['en']
+        return str(loaded)
+    except:
+        return str(data)
 
 #############################################################################
-# 1. DENORMALIZED BOOKINGS COLLECTION (Most Important)
+# 1. AIRCRAFTS (With Embedded Seats)
 #############################################################################
-print("Creating denormalized bookings collection...")
+print("1. Migrating Aircrafts (Embedding Seats)...")
+
+# Fetch all seats first to organize by aircraft
+cursor.execute("SELECT aircraft_code, seat_no, fare_conditions FROM seats")
+seats_map = {}
+for row in cursor.fetchall():
+    code = row['aircraft_code']
+    if code not in seats_map: seats_map[code] = []
+    seats_map[code].append({
+        'seat_no': row['seat_no'],
+        'fare_conditions': row['fare_conditions']
+    })
+
+cursor.execute("SELECT * FROM aircrafts_data")
+aircrafts_list = []
+for row in cursor.fetchall():
+    code = row['aircraft_code']
+    aircrafts_list.append({
+        '_id': code, # Using code as ID is cleaner for lookups
+        'model': parse_json(row['model']),
+        'range': row['range'],
+        'seats': seats_map.get(code, []) # Embed the seats here
+    })
+
+if aircrafts_list:
+    mongo_db.aircrafts.insert_many(aircrafts_list)
+    print(f"   -> Inserted {len(aircrafts_list)} aircraft documents")
+
+#############################################################################
+# 2. FLIGHTS (The Operational Core)
+#############################################################################
+print("2. Migrating Flights (Embedding Airport & Aircraft Data)...")
 
 cursor.execute("""
     SELECT 
-        b.book_ref,
-        b.book_date,
-        b.total_amount,
-        t.ticket_no,
-        t.passenger_id,
-        tf.flight_id,
-        tf.fare_conditions,
-        tf.amount as ticket_amount,
-        f.flight_no,
-        f.scheduled_departure,
-        f.scheduled_arrival,
-        f.departure_airport,
-        f.arrival_airport,
-        f.status,
-        f.aircraft_code,
-        bp.boarding_no,
-        bp.seat_no
-    FROM bookings b
-    LEFT JOIN tickets t ON b.book_ref = t.book_ref
-    LEFT JOIN ticket_flights tf ON t.ticket_no = tf.ticket_no
-    LEFT JOIN flights f ON tf.flight_id = f.flight_id
-    LEFT JOIN boarding_passes bp ON t.ticket_no = bp.ticket_no AND f.flight_id = bp.flight_id
-    ORDER BY b.book_ref, t.ticket_no, tf.flight_id
-""")
-
-rows = cursor.fetchall()
-columns = [desc[0] for desc in cursor.description]
-
-# Group by booking
-bookings_dict = {}
-for row in rows:
-    data = dict(zip(columns, row))
-    book_ref = data['book_ref']
-    
-    # Initialize booking document
-    if book_ref not in bookings_dict:
-        bookings_dict[book_ref] = {
-            '_id': book_ref,
-            'book_date': data['book_date'],
-            'total_amount': data['total_amount'],
-            'tickets': {}
-        }
-    
-    # Add ticket information
-    ticket_no = data['ticket_no']
-    if ticket_no and ticket_no not in bookings_dict[book_ref]['tickets']:
-        bookings_dict[book_ref]['tickets'][ticket_no] = {
-            'ticket_no': ticket_no,
-            'passenger_id': data['passenger_id'],
-            'flights': []
-        }
-    
-    # Add flight information to ticket
-    if ticket_no and data['flight_id']:
-        flight_info = {
-            'flight_id': data['flight_id'],
-            'flight_no': data['flight_no'],
-            'fare_conditions': data['fare_conditions'],
-            'amount': data['ticket_amount'],
-            'scheduled_departure': data['scheduled_departure'],
-            'scheduled_arrival': data['scheduled_arrival'],
-            'departure_airport': data['departure_airport'],
-            'arrival_airport': data['arrival_airport'],
-            'status': data['status'],
-            'aircraft_code': data['aircraft_code']
-        }
-        
-        # Add boarding pass info if exists
-        if data['boarding_no']:
-            flight_info['boarding_pass'] = {
-                'boarding_no': data['boarding_no'],
-                'seat_no': data['seat_no']
-            }
-        
-        bookings_dict[book_ref]['tickets'][ticket_no]['flights'].append(flight_info)
-
-# Convert tickets dict to list and insert into MongoDB
-for booking in bookings_dict.values():
-    booking['tickets'] = list(booking['tickets'].values())
-
-if bookings_dict:
-    mongo_db.bookings.insert_many(list(bookings_dict.values()))
-    print(f"✓ Inserted {len(bookings_dict)} denormalized bookings")
-
-#############################################################################
-# 2. FLIGHTS COLLECTION (with aircraft and airport details embedded)
-#############################################################################
-print("\nCreating denormalized flights collection...")
-
-cursor.execute("""
-    SELECT 
-        f.flight_id,
-        f.flight_no,
-        f.scheduled_departure,
-        f.scheduled_arrival,
-        f.departure_airport,
-        f.arrival_airport,
-        f.status,
-        f.aircraft_code,
-        f.actual_departure,
-        f.actual_arrival,
-        ac.model as aircraft_model,
-        ac.range as aircraft_range,
-        dep.airport_name as dep_airport_name,
-        dep.city as dep_city,
-        dep.timezone as dep_timezone,
-        arr.airport_name as arr_airport_name,
-        arr.city as arr_city,
-        arr.timezone as arr_timezone
+        f.*,
+        ac.model, ac.range,
+        dep.airport_name as dep_name, dep.city as dep_city, dep.timezone as dep_tz,
+        arr.airport_name as arr_name, arr.city as arr_city, arr.timezone as arr_tz
     FROM flights f
     LEFT JOIN aircrafts_data ac ON f.aircraft_code = ac.aircraft_code
     LEFT JOIN airports_data dep ON f.departure_airport = dep.airport_code
     LEFT JOIN airports_data arr ON f.arrival_airport = arr.airport_code
 """)
 
-flights = []
+flights_list = []
 for row in cursor.fetchall():
-    flight_doc = {
-        '_id': row[0],  # flight_id
-        'flight_no': row[1],
-        'scheduled_departure': row[2],
-        'scheduled_arrival': row[3],
-        'status': row[6],
-        'actual_departure': row[8],
-        'actual_arrival': row[9],
+    flights_list.append({
+        '_id': row['flight_id'], # Keep integer ID for easy referencing
+        'flight_no': row['flight_no'],
+        'scheduled_departure': row['scheduled_departure'],
+        'scheduled_arrival': row['scheduled_arrival'],
+        'status': row['status'],
+        'actual_departure': row['actual_departure'],
+        'actual_arrival': row['actual_arrival'],
         'aircraft': {
-            'code': row[7],
-            'model': row[10],
-            'range': row[11]
+            'code': row['aircraft_code'],
+            'model': parse_json(row['model'])
         },
         'departure': {
-            'airport_code': row[4],
-            'airport_name': row[12],
-            'city': row[13],
-            'timezone': row[14]
+            'airport_code': row['departure_airport'],
+            'airport_name': parse_json(row['dep_name']),
+            'city': parse_json(row['dep_city']),
+            'timezone': row['dep_tz']
         },
         'arrival': {
-            'airport_code': row[5],
-            'airport_name': row[15],
-            'city': row[16],
-            'timezone': row[17]
+            'airport_code': row['arrival_airport'],
+            'airport_name': parse_json(row['arr_name']),
+            'city': parse_json(row['arr_city']),
+            'timezone': row['arr_tz']
         }
-    }
-    flights.append(flight_doc)
+    })
 
-if flights:
-    mongo_db.flights.insert_many(flights)
-    print(f"✓ Inserted {len(flights)} denormalized flights")
+if flights_list:
+    mongo_db.flights.insert_many(flights_list)
+    print(f"   -> Inserted {len(flights_list)} flight documents")
 
 #############################################################################
-# 3. AIRCRAFTS COLLECTION (with seats embedded)
+# 3. BOOKINGS (The Transactional View)
 #############################################################################
-print("\nCreating aircrafts collection with embedded seats...")
+print("3. Migrating Bookings (Embedding Tickets, Referencing Flights)...")
 
+# FIXED QUERY: Removed passenger_name and contact_data
 cursor.execute("""
     SELECT 
-        ac.aircraft_code,
-        ac.model,
-        ac.range,
-        s.seat_no,
-        s.fare_conditions
-    FROM aircrafts_data ac
-    LEFT JOIN seats s ON ac.aircraft_code = s.aircraft_code
-    ORDER BY ac.aircraft_code, s.seat_no
+        b.book_ref, b.book_date, b.total_amount,
+        t.ticket_no, t.passenger_id,
+        tf.flight_id, tf.fare_conditions, tf.amount as ticket_amount,
+        f.flight_no, f.departure_airport, f.arrival_airport, f.scheduled_departure,
+        bp.boarding_no, bp.seat_no
+    FROM bookings b
+    JOIN tickets t ON b.book_ref = t.book_ref
+    JOIN ticket_flights tf ON t.ticket_no = tf.ticket_no
+    JOIN flights f ON tf.flight_id = f.flight_id
+    LEFT JOIN boarding_passes bp ON t.ticket_no = bp.ticket_no AND tf.flight_id = bp.flight_id
+    ORDER BY b.book_ref
 """)
 
-aircrafts_dict = {}
+bookings_map = {}
+
+# Process row by row
 for row in cursor.fetchall():
-    code = row[0]
-    if code not in aircrafts_dict:
-        aircrafts_dict[code] = {
-            '_id': code,
-            'model': row[1],
-            'range': row[2],
-            'seats': []
+    book_ref = row['book_ref']
+    
+    if book_ref not in bookings_map:
+        bookings_map[book_ref] = {
+            '_id': book_ref,
+            'book_date': row['book_date'],
+            'total_amount': row['total_amount'],
+            'tickets': {} 
         }
     
-    if row[3]:  # if seat exists
-        aircrafts_dict[code]['seats'].append({
-            'seat_no': row[3],
-            'fare_conditions': row[4]
-        })
+    ticket_no = row['ticket_no']
+    if ticket_no not in bookings_map[book_ref]['tickets']:
+        bookings_map[book_ref]['tickets'][ticket_no] = {
+            'ticket_no': ticket_no,
+            'passenger_id': row['passenger_id'],
+            # FIXED: Added default placeholders since columns are missing in SQL
+            'passenger_name': "Unknown Passenger", 
+            'contact_data': "{}",
+            'flight_legs': []
+        }
+        
+    leg = {
+        'flight_id': row['flight_id'],
+        'flight_no': row['flight_no'],
+        'route': f"{row['departure_airport']} -> {row['arrival_airport']}",
+        'scheduled_departure': row['scheduled_departure'], 
+        'fare_conditions': row['fare_conditions'],
+        'amount': row['ticket_amount']
+    }
+    
+    if row['boarding_no']:
+        leg['boarding_pass'] = {
+            'boarding_no': row['boarding_no'],
+            'seat_no': row['seat_no']
+        }
+        
+    bookings_map[book_ref]['tickets'][ticket_no]['flight_legs'].append(leg)
 
-if aircrafts_dict:
-    mongo_db.aircrafts.insert_many(list(aircrafts_dict.values()))
-    print(f"✓ Inserted {len(aircrafts_dict)} aircrafts with embedded seats")
+final_bookings = []
+for b in bookings_map.values():
+    b['tickets'] = list(b['tickets'].values())
+    final_bookings.append(b)
+
+if final_bookings:
+    mongo_db.bookings.insert_many(final_bookings)
+    print(f"   -> Inserted {len(final_bookings)} booking documents")
 
 #############################################################################
-# 4. AIRPORTS COLLECTION (standalone - reference data)
+# 4. AIRPORTS (Reference Data)
 #############################################################################
-print("\nCreating airports collection...")
-
-cursor.execute("SELECT airport_code, airport_name, city, coordinates, timezone FROM airports_data")
+print("4. Migrating Airports...")
+cursor.execute("SELECT * FROM airports_data")
 airports = []
 for row in cursor.fetchall():
     airports.append({
-        '_id': row[0],
-        'airport_name': row[1],
-        'city': row[2],
-        'coordinates': row[3],
-        'timezone': row[4]
+        '_id': row['airport_code'],
+        'airport_name': parse_json(row['airport_name']),
+        'city': parse_json(row['city']),
+        'coordinates': row['coordinates'],
+        'timezone': row['timezone']
     })
-
 if airports:
     mongo_db.airports.insert_many(airports)
-    print(f"✓ Inserted {len(airports)} airports")
+    print(f"   -> Inserted {len(airports)} airports")
 
-#############################################################################
-# CREATE INDEXES FOR PERFORMANCE
-#############################################################################
-print("\nCreating indexes...")
-
-# Bookings indexes
-mongo_db.bookings.create_index('book_date')
-mongo_db.bookings.create_index('tickets.passenger_id')
-mongo_db.bookings.create_index('tickets.flights.flight_id')
-
-# Flights indexes
-mongo_db.flights.create_index('flight_no')
-mongo_db.flights.create_index('scheduled_departure')
-mongo_db.flights.create_index('departure.airport_code')
-mongo_db.flights.create_index('arrival.airport_code')
-mongo_db.flights.create_index('status')
-
-# Aircrafts indexes
-mongo_db.aircrafts.create_index('model')
-
-# Airports indexes
-mongo_db.airports.create_index('city')
-
-print("✓ Indexes created")
-
-#############################################################################
-# VERIFICATION
-#############################################################################
 print("\n=== MIGRATION COMPLETE ===")
-print(f"Collections created:")
-print(f"  - bookings: {mongo_db.bookings.count_documents({})} documents")
-print(f"  - flights: {mongo_db.flights.count_documents({})} documents")
-print(f"  - aircrafts: {mongo_db.aircrafts.count_documents({})} documents")
-print(f"  - airports: {mongo_db.airports.count_documents({})} documents")
-
-# Show sample booking document
-print("\n=== SAMPLE BOOKING DOCUMENT ===")
-sample_booking = mongo_db.bookings.find_one()
-if sample_booking:
-    import json
-    print(json.dumps(sample_booking, indent=2, default=str))
-
-# Close connections
-conn.close()
-mongo_client.close()
