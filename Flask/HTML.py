@@ -130,14 +130,56 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_flights_aircraft_arrival ON flights (aircraft_code, arrival_airport);")
         conn.close() 
 
-        # ==================== MONGODB INDEXES ====================
-        print("Ensuring MongoDB Indexes...")
+        # ==================== MONGODB INDEXES & VALIDATION ====================
+        print("Ensuring MongoDB Indexes & Validation...")
+        
+        # 1. B-Tree Indexes
         mongo.db.flights.create_index([("status", 1), ("scheduled_departure", 1)])
         mongo.db.flights.create_index("flight_no")
         mongo.db.flights.create_index("departure.airport_code")
         mongo.db.flights.create_index("arrival.airport_code")
         mongo.db.flights.create_index("aircraft.code")
         mongo.db.bookings.create_index("tickets.ticket_no")
+        
+        # 2. Text Index for Full-Text Search
+        mongo.db.flights.create_index([
+            ("flight_no", "text"),
+            ("departure.airport_code", "text"),
+            ("arrival.airport_code", "text")
+        ])
+        
+        # 3. Schema Validation
+        flight_validator = {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["flight_no", "status", "scheduled_departure"],
+                "properties": {
+                    "flight_no": {
+                        "bsonType": "string",
+                        "description": "must be a string and is required"
+                    },
+                    "status": {
+                        "enum": ["Scheduled", "On Time", "Delayed", "Departed", "Arrived", "Cancelled"],
+                        "description": "can only be one of the enum values"
+                    },
+                    "scheduled_departure": {
+                        "bsonType": "string",
+                        "description": "must be a date string"
+                    }
+                }
+            }
+        }
+        try:
+            mongo.db.create_collection("flights")
+        except:
+            pass 
+            
+        try:
+            mongo.db.command("collMod", "flights", validator=flight_validator)
+            print("[OK] Flights Schema Validator Applied")
+        except Exception as e:
+            print(f"Warning: Could not apply validator: {e}")
+            
         print("[OK] All Indexes Initialized")
 
     except Exception as e:
@@ -918,7 +960,8 @@ def get_nosql_flights():
     search = request.args.get('search', '')
     query = {}
     if search:
-        query = {"$or": [{"flight_no": {"$regex": search, "$options": "i"}}, {"departure.airport_code": {"$regex": search, "$options": "i"}}]}
+        # IMPROVEMENT: Use Text Search instead of Regex
+        query = {"$text": {"$search": search}}
     total = mongo.db.flights.count_documents(query)
     cursor = mongo.db.flights.find(query).skip((page-1)*per_page).limit(per_page)
     flights = []
