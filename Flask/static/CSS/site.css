@@ -4,6 +4,72 @@
   font-style: normal;
 }
 
+.landing-actions {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    margin-top: 40px;
+    flex-wrap: wrap;
+}
+
+.btn-landing {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 15px 30px;
+    font-size: 1.2rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    border-radius: 50px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.3s ease;
+    border: 2px solid transparent;
+}
+
+/* Primary Button (Orange) */
+.btn-landing {
+    background-color: #ff9900;
+    color: white;
+    box-shadow: 0 4px 15px rgba(255, 153, 0, 0.4);
+}
+
+.btn-landing:hover {
+    background-color: #e68a00;
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(255, 153, 0, 0.6);
+    color: white;
+    text-decoration: none;
+}
+
+/* Outline Button (Transparent) */
+.btn-landing.btn-landing-outline {
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 2px solid white;
+    color: white;
+    box-shadow: none;
+}
+
+.btn-landing.btn-landing-outline:hover {
+    background-color: white;
+    color: #333;
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(255, 255, 255, 0.3);
+}
+
+/* Responsive adjustment */
+@media only screen and (max-width: 600px) {
+    .landing-actions {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .btn-landing {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
 /* Hero Section with Background Image */
 .hero-section {
     height: 100vh;
