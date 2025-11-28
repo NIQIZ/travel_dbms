@@ -462,3 +462,97 @@ input:checked + .slider:before {
     font-size: 1rem;
     transition: color 0.3s ease;
 }
+
+/* =========================================
+   PERFORMANCE WIDGET STYLES
+   ========================================= */
+.perf-widget {
+    position: fixed;
+    bottom: 0;
+    right: 20px;
+    width: 600px;
+    background-color: #1e1e1e;
+    color: #00ff00; /* Hacker green */
+    font-family: 'Consolas', 'Monaco', monospace;
+    border-radius: 10px 10px 0 0;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.3);
+    z-index: 9999;
+    transition: transform 0.3s ease;
+    transform: translateY(calc(100% - 40px)); /* Hidden by default */
+}
+
+.perf-widget.open {
+    transform: translateY(0);
+}
+
+.perf-header {
+    padding: 10px 15px;
+    background-color: #333;
+    color: white;
+    cursor: pointer;
+    border-radius: 10px 10px 0 0;
+    display: flex;
+    justify-content: space-between;
+    font-family: "Poppins", sans-serif;
+    font-size: 0.9rem;
+}
+
+.perf-header:hover {
+    background-color: #444;
+}
+
+.perf-content {
+    height: 300px;
+    overflow-y: auto;
+    padding: 10px;
+    font-size: 0.8rem;
+    border-top: 1px solid #444;
+}
+
+/* Scrollbar styling for the log */
+.perf-content::-webkit-scrollbar {
+    width: 8px;
+}
+.perf-content::-webkit-scrollbar-track {
+    background: #1e1e1e;
+}
+.perf-content::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 4px;
+}
+
+/* Log Entry Styling */
+.log-entry {
+    margin-bottom: 12px;
+    border-bottom: 1px solid #333;
+    padding-bottom: 8px;
+    animation: fadeIn 0.3s;
+}
+
+.log-entry.system { color: #aaa; }
+.log-entry.sql { border-left: 3px solid #2196F3; padding-left: 8px; }
+.log-entry.nosql { border-left: 3px solid #4CAF50; padding-left: 8px; }
+
+.log-title { font-weight: bold; margin-bottom: 2px; display: block; }
+.log-time { float: right; font-weight: bold; color: #fff; }
+.log-detail { color: #ccc; display: block; margin-top: 2px; white-space: pre-wrap; }
+.log-tag {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    margin-right: 5px;
+    color: #000;
+    font-weight: bold;
+}
+.tag-index { background-color: #FFEB3B; } /* Yellow for Index usage */
+.tag-scan { background-color: #F44336; color: white; } /* Red for Table Scan */
+
+/* Mobile responsive */
+@media only screen and (max-width: 768px) {
+    .perf-widget {
+        width: 100%;
+        right: 0;
+        border-radius: 0;
+    }
+}

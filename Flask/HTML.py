@@ -36,67 +36,65 @@ def get_db_connection():
         print(f"Database connection error: {e}")
         raise
 
-# === SQL PERFORMANCE HELPER ===
+# === SQL PERFORMANCE HELPER (Updated to return Logs) ===
 def execute_and_time(cursor, query, params=(), label="Query"):
-    print(f"\n--- SQL PERFORMANCE: {label} ---")
+    log_data = {"label": label, "type": "SQL", "plan": []}
+    
+    # 1. Explain Plan (Verify B+ Tree Usage)
     try:
         explain_query = f"EXPLAIN QUERY PLAN {query}"
         cursor.execute(explain_query, params)
         plan = cursor.fetchall()
-        print(f"B+ Tree Usage:")
         for row in plan:
-            print(f"  {row['detail']}")
+            log_data["plan"].append(row['detail'])
     except Exception as e:
-        print(f"  Could not explain plan: {e}")
+        log_data["plan"].append(f"Could not explain plan: {e}")
 
+    # 2. Measure Execution Time
     start_time = time.perf_counter()
     cursor.execute(query, params)
     results = cursor.fetchall()
     duration_ms = (time.perf_counter() - start_time) * 1000
-    print(f"Execution Time: {duration_ms:.4f} ms")
-    print("-" * 50)
-    return [dict(row) for row in results]
+    
+    log_data["duration"] = round(duration_ms, 4)
+    
+    # Return tuple: (Data, Log)
+    return [dict(row) for row in results], log_data
 
-# === NOSQL PERFORMANCE HELPER (NEW) ===
+# === NOSQL PERFORMANCE HELPER (Updated to return Logs) ===
 def execute_nosql_and_time(collection, pipeline, label="NoSQL Query"):
-    print(f"\n--- NOSQL PERFORMANCE: {label} ---")
+    log_data = {"label": label, "type": "NoSQL", "plan": []}
     
     # 1. Verify Index Usage (Explain Plan)
     try:
-        # We use the 'explain' command on the pipeline
         explanation = mongo.db.command(
             'aggregate', collection.name,
             pipeline=pipeline,
             explain=True
         )
-        
-        # Convert to string to search for keywords (Parsing deep JSON is complex)
         plan_str = json.dumps(explanation)
         
-        print("Index Usage Verification:")
         if "IXSCAN" in plan_str:
-            print("  YES: Used Index Scan (IXSCAN)")
+            log_data["plan"].append("✅ Used Index Scan (IXSCAN)")
         elif "COLLSCAN" in plan_str:
-            print("  NO: Used Collection Scan (COLLSCAN - Slow)")
+            log_data["plan"].append("⚠️ Used Collection Scan (COLLSCAN)")
         else:
-            print("  Complex Stage (See raw explain for details)")
+            log_data["plan"].append("ℹ️ Complex Stage (See raw explain)")
             
     except Exception as e:
-        print(f"  Could not explain plan: {e}")
+        log_data["plan"].append(f"Could not explain plan: {e}")
 
     # 2. Measure Execution Time
     start_time = time.perf_counter()
-    
-    # We must convert to list() to force actual execution
     results = list(collection.aggregate(pipeline))
-    
     duration_ms = (time.perf_counter() - start_time) * 1000
-    print(f"Execution Time: {duration_ms:.4f} ms")
-    print("-" * 50)
     
-    return results
+    log_data["duration"] = round(duration_ms, 4)
+    
+    return results, log_data
 
 def extract_json_value(json_str):
+    """Extract value from JSON string (for model, city, airport_name fields)"""
     if not json_str: return "Unknown"
     try:
         data = json.loads(json_str)
@@ -192,7 +190,7 @@ def index(): return render_template('index.html')
 @app.route('/attributes')
 def attributes(): return render_template('attributes.html')
 
-# ==================== SQL ANALYTICS (With Timing) ====================
+# ==================== SQL ANALYTICS (With Timing Logs) ====================
 
 @app.route('/api/flight-operations')
 def flight_operations():
@@ -201,18 +199,19 @@ def flight_operations():
         cursor = conn.cursor()
         
         q1 = "SELECT route, ROUND(AVG((JULIANDAY(SUBSTR(actual_arrival, 1, 19)) - JULIANDAY(SUBSTR(scheduled_arrival, 1, 19))) * 24 * 60), 2) AS avg_delay_mins FROM flight_routes WHERE status = 'Arrived' AND actual_arrival IS NOT NULL AND scheduled_arrival IS NOT NULL AND JULIANDAY(SUBSTR(actual_arrival, 1, 19)) > JULIANDAY(SUBSTR(scheduled_arrival, 1, 19)) GROUP BY route HAVING avg_delay_mins > 0 ORDER BY avg_delay_mins DESC LIMIT 5;"
-        least_punctual_routes = execute_and_time(cursor, q1, label="Least Punctual Routes")
+        least_punctual_routes, log1 = execute_and_time(cursor, q1, label="Least Punctual Routes")
         
         q2 = "SELECT COUNT(*) as total_flights, SUM(CASE WHEN status LIKE '%Delayed%' OR status = 'Delayed' THEN 1 ELSE 0 END) as delayed_flights, SUM(CASE WHEN status LIKE '%Cancel%' OR status = 'Cancelled' THEN 1 ELSE 0 END) as cancelled_flights, SUM(CASE WHEN status = 'Arrived' OR status = 'On Time' THEN 1 ELSE 0 END) as ontime_flights FROM flights"
-        overview_res = execute_and_time(cursor, q2, label="Overview Metrics")
+        overview_res, log2 = execute_and_time(cursor, q2, label="Overview Metrics")
         overview = overview_res[0] if overview_res else {}
         
         q3 = "SELECT ROUND(AVG((JULIANDAY(SUBSTR(actual_arrival, 1, 19)) - JULIANDAY(SUBSTR(scheduled_arrival, 1, 19))) * 24 * 60), 2) as avg_delay_minutes FROM flights WHERE actual_arrival IS NOT NULL AND scheduled_arrival IS NOT NULL AND status = 'Arrived' AND JULIANDAY(SUBSTR(actual_arrival, 1, 19)) > JULIANDAY(SUBSTR(scheduled_arrival, 1, 19))"
-        delay_res = execute_and_time(cursor, q3, label="Avg Delay Calculation")
+        delay_res, log3 = execute_and_time(cursor, q3, label="Avg Delay Calculation")
         overview['avg_delay_minutes'] = delay_res[0]['avg_delay_minutes'] if delay_res and delay_res[0]['avg_delay_minutes'] else 0
         
         conn.close()
-        return jsonify({'least_punctual_routes': least_punctual_routes, 'overview': overview})
+        # Return data AND performance logs
+        return jsonify({'least_punctual_routes': least_punctual_routes, 'overview': overview, '_perf': [log1, log2, log3]})
     except Exception as e: return jsonify({'error': str(e)}), 500
 
 @app.route('/api/route-performance')
@@ -221,9 +220,9 @@ def route_performance():
         conn = get_db_connection()
         cursor = conn.cursor()
         query = "SELECT fr.route, COUNT(fr.flight_id) AS flight_count FROM flight_routes AS fr GROUP BY fr.route ORDER BY flight_count DESC LIMIT 10;"
-        busiest_routes = execute_and_time(cursor, query, label="Route Performance")
+        busiest_routes, log1 = execute_and_time(cursor, query, label="Route Performance")
         conn.close()
-        return jsonify({'busiest_routes': busiest_routes})
+        return jsonify({'busiest_routes': busiest_routes, '_perf': [log1]})
     except Exception as e: return jsonify({'error': str(e)}), 500
 
 @app.route('/api/passenger-demand')
@@ -232,13 +231,13 @@ def passenger_demand():
         conn = get_db_connection()
         cursor = conn.cursor()
         q1 = "WITH FlightCapacity AS (SELECT fr.flight_id, fr.route, COUNT(s.seat_no) AS total_seats FROM flight_routes AS fr JOIN seats AS s ON fr.aircraft_code = s.aircraft_code GROUP BY fr.flight_id, fr.route), FlightBookings AS (SELECT flight_id, COUNT(ticket_no) AS booked_seats FROM boarding_passes GROUP BY flight_id) SELECT fc.route, ROUND(AVG((fb.booked_seats * 100.0 / fc.total_seats)), 2) AS avg_occupancy_percent FROM FlightCapacity AS fc JOIN FlightBookings AS fb ON fc.flight_id = fb.flight_id WHERE fc.total_seats > 0 GROUP BY fc.route ORDER BY avg_occupancy_percent DESC LIMIT 10;"
-        top_occupancy_routes = execute_and_time(cursor, q1, label="Passenger Occupancy")
+        top_occupancy_routes, log1 = execute_and_time(cursor, q1, label="Passenger Occupancy")
         q2 = "WITH RouteBookings AS (SELECT fr.route, COUNT(tf.ticket_no) AS total_tickets_sold FROM flight_routes AS fr JOIN ticket_flights AS tf ON fr.flight_id = tf.flight_id GROUP BY fr.route), TotalTickets AS (SELECT CAST(COUNT(ticket_no) AS REAL) AS grand_total FROM ticket_flights) SELECT rb.route, rb.total_tickets_sold, ROUND((rb.total_tickets_sold * 100.0 / tt.grand_total), 2) AS market_share_percent FROM RouteBookings AS rb CROSS JOIN TotalTickets AS tt ORDER BY market_share_percent DESC LIMIT 10;"
-        busiest_routes_market_share = execute_and_time(cursor, q2, label="Market Share High")
+        busiest_routes_market_share, log2 = execute_and_time(cursor, q2, label="Market Share High")
         q3 = "WITH RouteBookings AS (SELECT fr.route, COUNT(tf.ticket_no) AS total_tickets_sold FROM flight_routes AS fr JOIN ticket_flights AS tf ON fr.flight_id = tf.flight_id GROUP BY fr.route), TotalTickets AS (SELECT CAST(COUNT(ticket_no) AS REAL) AS grand_total FROM ticket_flights) SELECT rb.route, rb.total_tickets_sold, ROUND((rb.total_tickets_sold * 100.0 / tt.grand_total), 2) AS market_share_percent FROM RouteBookings AS rb CROSS JOIN TotalTickets AS tt WHERE rb.total_tickets_sold > 0 ORDER BY market_share_percent ASC LIMIT 10;"
-        least_busy_routes = execute_and_time(cursor, q3, label="Market Share Low")
+        least_busy_routes, log3 = execute_and_time(cursor, q3, label="Market Share Low")
         conn.close()
-        return jsonify({'top_occupancy_routes': top_occupancy_routes, 'busiest_routes_market_share': busiest_routes_market_share, 'least_busy_routes': least_busy_routes})
+        return jsonify({'top_occupancy_routes': top_occupancy_routes, 'busiest_routes_market_share': busiest_routes_market_share, 'least_busy_routes': least_busy_routes, '_perf': [log1, log2, log3]})
     except Exception as e: return jsonify({'error': str(e)}), 500
 
 @app.route('/api/revenue-analysis')
@@ -247,15 +246,15 @@ def revenue_analysis():
         conn = get_db_connection()
         cursor = conn.cursor()
         q1 = "SELECT tf.fare_conditions, SUM(tf.amount) AS total_revenue_by_class FROM ticket_flights AS tf GROUP BY tf.fare_conditions ORDER BY total_revenue_by_class DESC;"
-        revenue_by_class = execute_and_time(cursor, q1, label="Revenue by Class")
+        revenue_by_class, log1 = execute_and_time(cursor, q1, label="Revenue by Class")
         q2 = "SELECT fr.route, SUM(tf.amount) AS total_revenue FROM flight_routes AS fr JOIN ticket_flights AS tf ON fr.flight_id = tf.flight_id GROUP BY fr.route ORDER BY total_revenue DESC LIMIT 3;"
-        top_revenue_routes = execute_and_time(cursor, q2, label="Top Revenue Routes")
+        top_revenue_routes, log2 = execute_and_time(cursor, q2, label="Top Revenue Routes")
         q3 = "SELECT fr.route, SUM(tf.amount) AS total_revenue FROM flight_routes AS fr JOIN ticket_flights AS tf ON fr.flight_id = tf.flight_id GROUP BY fr.route HAVING total_revenue > 0 ORDER BY total_revenue ASC LIMIT 3;"
-        least_revenue_routes = execute_and_time(cursor, q3, label="Least Revenue Routes")
+        least_revenue_routes, log3 = execute_and_time(cursor, q3, label="Least Revenue Routes")
         q4 = "SELECT fr.route, tf.fare_conditions, SUM(tf.amount) AS total_revenue_by_class FROM flight_routes AS fr JOIN ticket_flights AS tf ON fr.flight_id = tf.flight_id GROUP BY fr.route, tf.fare_conditions ORDER BY total_revenue_by_class DESC LIMIT 20;"
-        revenue_by_class_route = execute_and_time(cursor, q4, label="Rev by Route & Class")
+        revenue_by_class_route, log4 = execute_and_time(cursor, q4, label="Rev by Route & Class")
         conn.close()
-        return jsonify({'revenue_by_class': revenue_by_class, 'top_revenue_routes': top_revenue_routes, 'least_revenue_routes': least_revenue_routes, 'revenue_by_class_route': revenue_by_class_route})
+        return jsonify({'revenue_by_class': revenue_by_class, 'top_revenue_routes': top_revenue_routes, 'least_revenue_routes': least_revenue_routes, 'revenue_by_class_route': revenue_by_class_route, '_perf': [log1, log2, log3, log4]})
     except Exception as e: return jsonify({'error': str(e)}), 500
 
 @app.route('/api/resource-planning')
@@ -264,33 +263,39 @@ def resource_planning():
         conn = get_db_connection()
         cursor = conn.cursor()
         q1 = "SELECT fr.route, fr.aircraft_code, ad.model AS aircraft_model, COUNT(fr.flight_id) AS total_flights_on_route FROM flight_routes AS fr JOIN aircrafts_data AS ad ON fr.aircraft_code = ad.aircraft_code GROUP BY fr.route, fr.aircraft_code, ad.model ORDER BY total_flights_on_route DESC LIMIT 20;"
-        aircraft_by_route_raw = execute_and_time(cursor, q1, label="Aircraft by Route")
+        aircraft_by_route_raw, log1 = execute_and_time(cursor, q1, label="Aircraft by Route")
         aircraft_by_route = []
         for row in aircraft_by_route_raw:
             d = row
             d['aircraft_model'] = extract_json_value(row['aircraft_model'])
             aircraft_by_route.append(d)
+        
         q2 = "SELECT f.arrival_airport AS airport_code, ad.city AS destination_city, COUNT(f.flight_id) AS total_arrivals FROM flights AS f JOIN airports_data AS ad ON f.arrival_airport = ad.airport_code GROUP BY f.arrival_airport, destination_city ORDER BY total_arrivals DESC LIMIT 3;"
-        destinations_raw = execute_and_time(cursor, q2, label="Top Destinations")
+        destinations_raw, log2 = execute_and_time(cursor, q2, label="Top Destinations")
         top_destinations = []
         for row in destinations_raw:
             top_destinations.append({'airport_code': row['airport_code'], 'city': extract_json_value(row['destination_city']), 'total_arrivals': row['total_arrivals']})
+            
         q3 = "SELECT f.aircraft_code, ad.model AS aircraft_model, SUM(ad.range) AS total_utilization_proxy_miles FROM flights AS f JOIN aircrafts_data AS ad ON f.aircraft_code = ad.aircraft_code WHERE f.status = 'Arrived' GROUP BY f.aircraft_code, aircraft_model ORDER BY total_utilization_proxy_miles DESC LIMIT 10;"
-        aircraft_utilization_raw = execute_and_time(cursor, q3, label="Aircraft Utilization")
+        aircraft_utilization_raw, log3 = execute_and_time(cursor, q3, label="Aircraft Utilization")
         aircraft_utilization = []
         for row in aircraft_utilization_raw:
             aircraft_utilization.append({'aircraft_code': row['aircraft_code'], 'aircraft_model': extract_json_value(row['aircraft_model']), 'total_mileage': row['total_utilization_proxy_miles']})
+            
         q4 = "SELECT DISTINCT f.aircraft_code, ad.model AS aircraft_model, COUNT(f.flight_id) as flight_count FROM flights AS f JOIN aircrafts_data AS ad ON f.aircraft_code = ad.aircraft_code GROUP BY f.aircraft_code, ad.model ORDER BY flight_count DESC;"
-        aircraft_list_raw = execute_and_time(cursor, q4, label="Aircraft List")
+        aircraft_list_raw, log4 = execute_and_time(cursor, q4, label="Aircraft List")
         aircraft_list = []
         for row in aircraft_list_raw:
             aircraft_list.append({'aircraft_code': row['aircraft_code'], 'aircraft_model': extract_json_value(row['aircraft_model']), 'flight_count': row['flight_count']})
+            
         q5 = "SELECT fr.flight_id, fr.route, SUBSTR(fr.scheduled_departure, 1, 16) AS scheduled_departure_time, fr.status FROM flight_routes AS fr WHERE fr.aircraft_code = 'SU9' ORDER BY fr.scheduled_departure ASC LIMIT 50;"
-        su9_routes = execute_and_time(cursor, q5, label="SU9 Routes")
+        su9_routes, log5 = execute_and_time(cursor, q5, label="SU9 Routes")
         su9_routes_list = [dict(row) for row in su9_routes] 
+        
         conn.close()
-        return jsonify({'aircraft_by_route': aircraft_by_route, 'top_destinations': top_destinations, 'aircraft_utilization': aircraft_utilization, 'aircraft_list': aircraft_list, 'su9_routes': su9_routes_list})
-    except Exception as e: return jsonify({'error': str(e)}), 500
+        return jsonify({'aircraft_by_route': aircraft_by_route, 'top_destinations': top_destinations, 'aircraft_utilization': aircraft_utilization, 'aircraft_list': aircraft_list, 'su9_routes': su9_routes_list, '_perf': [log1, log2, log3, log4, log5]})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/aircraft-routes/<aircraft_code>')
 def get_aircraft_routes(aircraft_code):
@@ -301,7 +306,8 @@ def get_aircraft_routes(aircraft_code):
         routes = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return jsonify({'routes': routes})
-    except Exception as e: return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # ==================== CRUD MANAGEMENT PAGES ====================
 @app.route('/add_booking', methods=['GET', 'POST'])
@@ -311,8 +317,8 @@ def add_booking(): return render_template('add_booking.html', success=False)
 def manage(): return render_template('crudManager.html')
 
 # ==================== SQL CRUD (Transaction Managed) ====================
-# (Skipping SQL CRUD Logic display for brevity - assumed same as previous)
-# ... [SQL CRUD FUNCTIONS] ...
+# (Keeping these exactly as they were)
+
 @app.route('/api/flights', methods=['GET'])
 def get_flights():
     try:
@@ -676,6 +682,7 @@ def delete_aircraft(aircraft_code):
     finally:
         if conn: conn.close()
 
+# === AIRPORTS CRUD (SQL) ===
 @app.route('/api/airports', methods=['GET'])
 def get_airports():
     try:
@@ -811,7 +818,7 @@ def nosql_flight_operations():
             "ontime": {"$sum": {"$cond": [{"$in": ["$status", ["Arrived", "On Time"]]}, 1, 0]}}
         }}
     ]
-    overview_stats = execute_nosql_and_time(mongo.db.flights, pipeline_overview, label="Overview Metrics")
+    overview_stats, log1 = execute_nosql_and_time(mongo.db.flights, pipeline_overview, label="Overview Metrics")
     overview = overview_stats[0] if overview_stats else {"total_flights": 0}
     overview_data = {
         "total_flights": overview.get('total_flights', 0),
@@ -827,9 +834,10 @@ def nosql_flight_operations():
         {"$sort": {"count": -1}},
         {"$limit": 5}
     ]
-    punctual_data = [{"route": str(doc["_id"]), "avg_delay_mins": doc["count"] * 15} for doc in execute_nosql_and_time(mongo.db.flights, pipeline_punctual, label="Least Punctual")]
+    punctual_data_raw, log2 = execute_nosql_and_time(mongo.db.flights, pipeline_punctual, label="Least Punctual")
+    punctual_data = [{"route": str(doc["_id"]), "avg_delay_mins": doc["count"] * 15} for doc in punctual_data_raw]
 
-    return jsonify({'least_punctual_routes': punctual_data, 'overview': overview_data})
+    return jsonify({'least_punctual_routes': punctual_data, 'overview': overview_data, '_perf': [log1, log2]})
 
 @app.route('/api/nosql/route-performance')
 def nosql_route_performance():
@@ -841,8 +849,9 @@ def nosql_route_performance():
         {"$sort": {"flight_count": -1}},
         {"$limit": 10}
     ]
-    busiest = [{"route": doc["_id"], "flight_count": doc["flight_count"]} for doc in execute_nosql_and_time(mongo.db.flights, pipeline, label="Route Performance")]
-    return jsonify({'busiest_routes': busiest})
+    busiest_raw, log1 = execute_nosql_and_time(mongo.db.flights, pipeline, label="Route Performance")
+    busiest = [{"route": doc["_id"], "flight_count": doc["flight_count"]} for doc in busiest_raw]
+    return jsonify({'busiest_routes': busiest, '_perf': [log1]})
 
 @app.route('/api/nosql/resource-planning')
 def nosql_resource_planning():
@@ -866,7 +875,7 @@ def nosql_resource_planning():
         {"$sort": {"total_flights_on_route": -1}},
         {"$limit": 20}
     ]
-    aircraft_by_route = execute_nosql_and_time(mongo.db.flights, pipeline_aircraft_route, label="Aircraft by Route")
+    aircraft_by_route, log1 = execute_nosql_and_time(mongo.db.flights, pipeline_aircraft_route, label="Aircraft by Route")
 
     # 2. Top Destinations
     pipeline_destinations = [
@@ -883,7 +892,7 @@ def nosql_resource_planning():
         {"$sort": {"total_arrivals": -1}},
         {"$limit": 3}
     ]
-    top_destinations = execute_nosql_and_time(mongo.db.flights, pipeline_destinations, label="Top Destinations")
+    top_destinations, log2 = execute_nosql_and_time(mongo.db.flights, pipeline_destinations, label="Top Destinations")
 
     # 3. Aircraft Utilization
     pipeline_utilization = [
@@ -909,7 +918,7 @@ def nosql_resource_planning():
         {"$sort": {"total_mileage": -1}},
         {"$limit": 10}
     ]
-    aircraft_utilization = execute_nosql_and_time(mongo.db.flights, pipeline_utilization, label="Aircraft Utilization")
+    aircraft_utilization, log3 = execute_nosql_and_time(mongo.db.flights, pipeline_utilization, label="Aircraft Utilization")
 
     # 4. Dropdown List
     pipeline_list = [
@@ -917,22 +926,23 @@ def nosql_resource_planning():
         {"$project": {"aircraft_code": "$_id.code", "aircraft_model": "$_id.model", "flight_count": "$count", "_id": 0}},
         {"$sort": {"flight_count": -1}}
     ]
-    aircraft_list = execute_nosql_and_time(mongo.db.flights, pipeline_list, label="Aircraft List")
+    aircraft_list, log4 = execute_nosql_and_time(mongo.db.flights, pipeline_list, label="Aircraft List")
 
     return jsonify({
         'aircraft_by_route': aircraft_by_route,
         'top_destinations': top_destinations,
         'aircraft_utilization': aircraft_utilization,
         'aircraft_list': aircraft_list,
-        'su9_routes': []
+        'su9_routes': [],
+        '_perf': [log1, log2, log3, log4]
     })
 
 # Stubs for unused charts
 @app.route('/api/nosql/passenger-demand')
-def nosql_passenger_demand(): return jsonify({'top_occupancy_routes': [], 'busiest_routes_market_share': [], 'least_busy_routes': []})
+def nosql_passenger_demand(): return jsonify({'top_occupancy_routes': [], 'busiest_routes_market_share': [], 'least_busy_routes': [], '_perf': []})
 
 @app.route('/api/nosql/revenue-analysis')
-def nosql_revenue_analysis(): return jsonify({'revenue_by_class': [], 'top_revenue_routes': [], 'least_revenue_routes': [], 'revenue_by_class_route': []})
+def nosql_revenue_analysis(): return jsonify({'revenue_by_class': [], 'top_revenue_routes': [], 'least_revenue_routes': [], 'revenue_by_class_route': [], '_perf': []})
 
 @app.route('/api/nosql/aircraft-routes/<aircraft_code>')
 def nosql_get_aircraft_routes(aircraft_code):
@@ -948,7 +958,7 @@ def nosql_get_aircraft_routes(aircraft_code):
         {"$sort": {"scheduled_departure_time": 1}},
         {"$limit": 50}
     ]
-    routes = execute_nosql_and_time(mongo.db.flights, pipeline, label="SU9 Routes")
+    routes, log1 = execute_nosql_and_time(mongo.db.flights, pipeline, label="SU9 Routes")
     return jsonify({'routes': routes})
 
 # --- NoSQL CRUD Endpoints ---

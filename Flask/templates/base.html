@@ -3,41 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='Libraries/bootstrap/dist/css/bootstrap.min.css') }}">
-    <!-- Navbar CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='CSS/baseNavbar.css') }}">
-    <!-- Overall Site CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='CSS/site.css') }}">
-    <!-- Dashboard CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='CSS/dashboard.css') }}">
-    <!-- Google Fonts -->
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@700&display=swap" type="text/css">
-    <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <!-- Overall Site JS -->
     <script src="{{ url_for('static', filename='JS/siteJS.js') }}"></script>
-     <!-- Bootstrap JS and dependencies -->
      <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
      <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
      <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
 
-     <!------Flask head module for other pages to add on------>
-    {% block head %}{% endblock %}
+     {% block head %}{% endblock %}
 
 </head>
 <body>
     <header>
-        <!---------The Navbar------------------------>
         <nav class="navbar navbar-expand-md navbar-custom">
             <div class="container">
-                <!----Navigates user to index page------->
                 <a class="navbar-brand" href="{{url_for('index')}}">AirlinesDB</a>
-                <!----Toggler for mobile view of navbar---->
                 <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                     <span class="navbar-toggler-icon"></span>
                 </button>
-                <!----Navbar links---->
                 <div class="collapse navbar-collapse" id="navbarNav">
                     <ul class="navbar-nav ml-auto">
                         <li class="nav-item">
@@ -51,16 +38,25 @@
             </div>
         </nav>
     </header>
-    <!------Flask body module for other pages to add on------>
     {% block body %}{% endblock %}
 
+    <div id="perf-widget" class="perf-widget">
+        <div class="perf-header" onclick="togglePerfLog()">
+            <span><i class="fas fa-terminal"></i> Database Performance Log</span>
+            <span id="perf-toggle-icon"><i class="fas fa-chevron-up"></i></span>
+        </div>
+        <div class="perf-content" id="perf-log-content">
+            <div class="log-entry system">
+                <span class="timestamp">System:</span> Ready to capture database metrics...
+            </div>
+        </div>
+    </div>
+
 </body>
-<!------Footer for all pages------>
 <footer class="footer mt-auto py-1 bg-light">
     <div class="container">
         <span class="text-muted">2025 Airlines Database. Lab 1 Group.</span>
-         <!----Navigates user to Attributes Page------->
-        <a href="{{url_for('attributes')}}">Attributions</a>
+         <a href="{{url_for('attributes')}}">Attributions</a>
     </div>
 </footer>
 </html>
