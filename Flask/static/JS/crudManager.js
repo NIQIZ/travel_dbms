@@ -68,9 +68,12 @@ async function loadData(search = '') {
             renderBookings(data.bookings);
             renderPagination('bookings', data);
         } else if (currentTab === 'aircraft') {
-            // Note: API returns 'aircraft' key
             renderAircraft(data.aircraft);
             renderPagination('aircraft', data);
+        } else if (currentTab === 'airports') {
+            // NEW AIRPORT LOGIC
+            renderAirports(data.airports);
+            renderPagination('airports', data);
         }
     } catch (error) {
         console.error('Error loading data:', error);
@@ -155,6 +158,31 @@ function renderAircraft(aircraft) {
     `).join('');
 }
 
+// NEW: Render Airports Table
+function renderAirports(airports) {
+    const tbody = document.getElementById('airports-tbody');
+    
+    if (!airports || airports.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="loading">No airports found</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = airports.map(ap => `
+        <tr>
+            <td>${ap.airport_code}</td>
+            <td>${ap.airport_name}</td>
+            <td>${ap.city}</td>
+            <td>${ap.timezone}</td>
+            <td>
+                <div class="action-buttons">
+                    <button class="btn btn-warning btn-sm" onclick="editAirport('${ap.airport_code}')">✏️ Edit</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteAirport('${ap.airport_code}')">🗑️ Delete</button>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
 // Render pagination
 function renderPagination(type, data) {
     const pagination = document.getElementById(`${type}-pagination`);
@@ -190,6 +218,13 @@ function searchBookings() {
 
 function searchAircraft() {
     const search = document.getElementById('aircraft-search').value;
+    currentPage = 1;
+    loadData(search);
+}
+
+// NEW: Search Airports
+function searchAirports() {
+    const search = document.getElementById('airports-search').value;
     currentPage = 1;
     loadData(search);
 }
@@ -332,6 +367,47 @@ async function deleteAircraft(aircraftCode) {
     }
 }
 
+// NEW: CRUD Operations - Airports
+async function editAirport(code) {
+    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
+    try {
+        const response = await fetch(`${prefix}/airports/${code}`);
+        const airport = await response.json();
+        
+        currentMode = 'edit';
+        currentRecordId = code;
+        document.getElementById('modal-title').textContent = `Edit Airport ${code}`;
+        
+        const formHtml = getFormHtml('airport', airport);
+        document.getElementById('modal-form').innerHTML = formHtml;
+        document.getElementById('recordModal').classList.add('active');
+    } catch (error) {
+        showMessage('airports', 'Error loading airport data', 'error');
+    }
+}
+
+async function deleteAirport(code) {
+    if (!confirm(`Are you sure you want to delete airport ${code}?`)) return;
+    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
+    
+    try {
+        const response = await fetch(`${prefix}/airports/${code}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showMessage('airports', result.message, 'success');
+            loadData();
+        } else {
+            showMessage('airports', result.error, 'error');
+        }
+    } catch (error) {
+        showMessage('airports', 'Error deleting airport', 'error');
+    }
+}
+
 // Form submission
 async function submitForm(type) {
     const formData = new FormData(document.getElementById('record-form'));
@@ -348,12 +424,12 @@ async function submitForm(type) {
         delete data.contact_phone;
     }
     
-    let url, method;
     let endpointType = type;
     if(type === 'flight') endpointType = 'flights';
     if(type === 'booking') endpointType = 'bookings';
-    // aircraft is singular in API but plural in some contexts, keeping 'aircraft' per original logic
+    if(type === 'airport') endpointType = 'airports'; // NEW
 
+    let url, method;
     if (currentMode === 'create') {
         url = `${prefix}/${endpointType}`;
         method = 'POST';
@@ -393,6 +469,8 @@ function getFormHtml(type, data) {
         return getBookingForm(data);
     } else if (type === 'aircraft') {
         return getAircraftForm(data);
+    } else if (type === 'airport') {
+        return getAirportForm(data); // NEW
     }
 }
 
@@ -512,6 +590,40 @@ function getAircraftForm(aircraft) {
             <div class="form-group">
                 <label>Range (km) *</label>
                 <input type="number" name="range" value="${aircraft?.range || ''}" required min="0">
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">${currentMode === 'create' ? 'Create' : 'Update'}</button>
+            </div>
+        </form>
+    `;
+}
+
+// NEW: Airport Form
+function getAirportForm(airport) {
+    return `
+        <form id="record-form" onsubmit="event.preventDefault(); submitForm('airport');">
+            ${currentMode === 'create' ? `
+            <div class="form-group">
+                <label>Airport Code *</label>
+                <input type="text" name="airport_code" value="${airport?.airport_code || ''}" required maxlength="3" style="text-transform:uppercase">
+            </div>
+            ` : ''}
+            <div class="form-group">
+                <label>Airport Name *</label>
+                <input type="text" name="airport_name" value="${airport?.airport_name || ''}" required>
+            </div>
+            <div class="form-group">
+                <label>City *</label>
+                <input type="text" name="city" value="${airport?.city || ''}" required>
+            </div>
+            <div class="form-group">
+                <label>Timezone</label>
+                <input type="text" name="timezone" value="${airport?.timezone || ''}">
+            </div>
+            <div class="form-group">
+                <label>Coordinates</label>
+                <input type="text" name="coordinates" value="${airport?.coordinates || ''}">
             </div>
             <div class="form-actions">
                 <button type="button" class="btn" onclick="closeModal()">Cancel</button>

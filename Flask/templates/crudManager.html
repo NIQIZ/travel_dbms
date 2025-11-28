@@ -390,6 +390,9 @@
         <button class="tab-btn" onclick="switchTab('aircraft')">
             🛫 Aircraft
         </button>
+        <button class="tab-btn" onclick="switchTab('airports')">
+            🏢 Airports
+        </button>
     </div>
     
     <div id="flights-tab" class="tab-content active">
@@ -491,6 +494,39 @@
         </div>
         
         <div class="pagination" id="aircraft-pagination"></div>
+    </div>
+
+    <div id="airports-tab" class="tab-content">
+        <div class="controls">
+            <div class="search-box">
+                <input type="text" id="airports-search" placeholder="Search airports...">
+                <button class="btn btn-primary" onclick="searchAirports()">Search</button>
+            </div>
+            <button class="btn btn-success" onclick="openCreateModal('airport')">
+                ➕ Add New Airport
+            </button>
+        </div>
+        
+        <div id="airports-message"></div>
+        
+        <div class="data-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Airport Name</th>
+                        <th>City</th>
+                        <th>Timezone</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="airports-tbody">
+                    <tr><td colspan="5" class="loading">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="pagination" id="airports-pagination"></div>
     </div>
 </div>
 

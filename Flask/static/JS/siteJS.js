@@ -21,16 +21,16 @@ let chartInstances = {};
 
 // Helper function to destroy and create chart
 function createOrUpdateChart(canvasId, config) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return; // Skip if canvas doesn't exist
+
     // Destroy existing chart if it exists
     if (chartInstances[canvasId]) {
         chartInstances[canvasId].destroy();
     }
     
     // Create new chart
-    const ctx = document.getElementById(canvasId);
-    if (ctx) {
-        chartInstances[canvasId] = new Chart(ctx.getContext('2d'), config);
-    }
+    chartInstances[canvasId] = new Chart(ctx.getContext('2d'), config);
 }
 
 // Toggle Source Function
@@ -59,67 +59,135 @@ function toggleDashboardSource() {
     loadDashboardData();
 }
 
-// Initialize all charts when page loads
+// === PERFORMANCE WIDGET LOGIC ===
+function togglePerfLog() {
+    const widget = document.getElementById('perf-widget');
+    const icon = document.getElementById('perf-toggle-icon');
+    widget.classList.toggle('open');
+    icon.innerHTML = widget.classList.contains('open') ? '<i class="fas fa-chevron-down"></i>' : '<i class="fas fa-chevron-up"></i>';
+}
+
+function logPerformance(logs) {
+    const container = document.getElementById('perf-log-content');
+    if (!container || !logs || logs.length === 0) return;
+
+    logs.forEach(log => {
+        const planStr = log.plan ? log.plan.join(' ') : '';
+        const isIndexUsed = planStr.includes('USING INDEX') || planStr.includes('COVERING INDEX') || planStr.includes('IXSCAN');
+        const isScan = planStr.includes('SCAN TABLE') || planStr.includes('COLLSCAN');
+        
+        let tagClass = '';
+        let tagText = 'QUERY';
+        
+        if (isIndexUsed) {
+            tagClass = 'tag-index';
+            tagText = 'INDEXED';
+        } else if (isScan) {
+            tagClass = 'tag-scan';
+            tagText = 'SCAN';
+        }
+        
+        const entry = document.createElement('div');
+        entry.className = `log-entry ${log.type ? log.type.toLowerCase() : 'system'}`;
+        
+        let planHtml = log.plan ? log.plan.map(p => `<div>${p}</div>`).join('') : '';
+        
+        entry.innerHTML = `
+            <span class="log-title">
+                <span class="log-tag ${tagClass}">${tagText}</span>
+                ${log.label}
+            </span>
+            <span class="log-time">${log.duration} ms</span>
+            <span class="log-detail">${planHtml}</span>
+        `;
+        
+        container.insertBefore(entry, container.firstChild); 
+    });
+}
+
+// Initialize on load
 document.addEventListener('DOMContentLoaded', function() {
     loadDashboardData();
 });
 
-async function loadDashboardData() {
+// === SAFE RENDER HELPER ===
+function safeRender(renderFunction, data, name) {
     try {
-        // Determine API prefix based on toggle
+        renderFunction(data);
+    } catch (e) {
+        console.error(`Failed to render chart [${name}]:`, e);
+    }
+}
+
+async function loadDashboardData() {
+    const logContainer = document.getElementById('perf-log-content');
+    if(logContainer) {
+        logContainer.innerHTML = '<div class="log-entry system">Fetching new data...</div>';
+    }
+
+    try {
         const prefix = useNoSQL ? '/api/nosql' : '/api';
         
-        // Load all data in parallel
-        const [flightOps, routePerf, passengerDemand, revenue, resources] = await Promise.all([
-            fetch(`${prefix}/flight-operations`).then(r => {
-                if (!r.ok) throw new Error(`Flight operations failed: ${r.statusText}`);
-                return r.json();
-            }),
-            fetch(`${prefix}/route-performance`).then(r => {
-                if (!r.ok) throw new Error(`Route performance failed: ${r.statusText}`);
-                return r.json();
-            }),
-            fetch(`${prefix}/passenger-demand`).then(r => {
-                if (!r.ok) throw new Error(`Passenger demand failed: ${r.statusText}`);
-                return r.json();
-            }),
-            fetch(`${prefix}/revenue-analysis`).then(r => {
-                if (!r.ok) throw new Error(`Revenue analysis failed: ${r.statusText}`);
-                return r.json();
-            }),
-            fetch(`${prefix}/resource-planning`).then(r => {
-                if (!r.ok) throw new Error(`Resource planning failed: ${r.statusText}`);
-                return r.json();
-            })
+        // Fetch all data in parallel
+        const responses = await Promise.all([
+            fetch(`${prefix}/flight-operations`).then(r => r.json()),
+            fetch(`${prefix}/route-performance`).then(r => r.json()),
+            fetch(`${prefix}/passenger-demand`).then(r => r.json()),
+            fetch(`${prefix}/revenue-analysis`).then(r => r.json()),
+            fetch(`${prefix}/resource-planning`).then(r => r.json())
         ]);
-        
-        // Update key metrics
-        updateKeyMetrics(flightOps.overview);
-        
-        // Create all charts/visualizations
-        createPunctualChart(flightOps.least_punctual_routes);
-        createRoutesChart(routePerf.busiest_routes);
-        createOccupancyChart(passengerDemand.top_occupancy_routes);
-        createMarketShareChart(passengerDemand.busiest_routes_market_share);
-        createLeastBusyChart(passengerDemand.least_busy_routes);
-        createProfitableRoutesChart(revenue.top_revenue_routes, revenue.least_revenue_routes);
-        createRevenueClassChart(revenue.revenue_by_class);
-        createRevenueClassRouteChart(revenue.revenue_by_class_route);
-        createAircraftRouteChart(resources.aircraft_by_route);
-        createDestinationsChart(resources.top_destinations);
-        createUtilizationChart(resources.aircraft_utilization);
-        
-        // Initialize aircraft filter and table
-        initializeAircraftFilter(resources.aircraft_list);
-        createSU9RoutesTable(resources.su9_routes);
+
+        const [flightOps, routePerf, passengerDemand, revenue, resources] = responses;
+
+        // === AGGREGATE LOGS ===
+        let allLogs = [];
+        responses.forEach(res => {
+            if (res._perf) allLogs = allLogs.concat(res._perf);
+        });
+        logPerformance(allLogs);
+
+        // === RENDER CHARTS SAFELY ===
+        if(flightOps) {
+            safeRender(updateKeyMetrics, flightOps.overview, "Key Metrics");
+            safeRender(createPunctualChart, flightOps.least_punctual_routes, "Punctuality");
+        }
+
+        if(routePerf) {
+            safeRender(createRoutesChart, routePerf.busiest_routes, "Route Perf");
+        }
+
+        if(passengerDemand) {
+            safeRender(createOccupancyChart, passengerDemand.top_occupancy_routes, "Occupancy");
+            safeRender(createMarketShareChart, passengerDemand.busiest_routes_market_share, "Market Share");
+            safeRender(createLeastBusyChart, passengerDemand.least_busy_routes, "Least Busy");
+        }
+
+        if(revenue) {
+            // Wrapper to pass two args to the profitable chart
+            try {
+                createProfitableRoutesChart(revenue.top_revenue_routes, revenue.least_revenue_routes);
+            } catch (e) { console.error("Failed Profit Chart", e); }
+
+            safeRender(createRevenueClassChart, revenue.revenue_by_class, "Rev Class");
+            safeRender(createRevenueClassRouteChart, revenue.revenue_by_class_route, "Rev Route");
+        }
+
+        if(resources) {
+            safeRender(createAircraftRouteChart, resources.aircraft_by_route, "Matrix Chart");
+            safeRender(createDestinationsChart, resources.top_destinations, "Destinations");
+            safeRender(createUtilizationChart, resources.aircraft_utilization, "Utilization");
+            
+            if(resources.aircraft_list) initializeAircraftFilter(resources.aircraft_list);
+            if(resources.su9_routes) createSU9RoutesTable(resources.su9_routes);
+        }
         
     } catch (error) {
-        console.error('Error loading dashboard data:', error);
-        // We do not alert here to avoid spamming user on switch, just log
+        console.error('CRITICAL ERROR loading dashboard:', error);
     }
 }
 
 function updateKeyMetrics(overview) {
+    if(!overview) return;
     document.getElementById('totalFlights').textContent = (overview.total_flights || 0).toLocaleString();
     
     let ontimeRate = 0;
@@ -151,18 +219,8 @@ function createPunctualChart(data) {
             responsive: true,
             maintainAspectRatio: false,
             indexAxis: 'y',
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                x: {
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Average Delay (mins)'
-                    }
-                }
-            }
+            plugins: { legend: { display: false } },
+            scales: { x: { beginAtZero: true, title: { display: true, text: 'Average Delay (mins)' } } }
         }
     });
 }
@@ -183,20 +241,10 @@ function createRoutesChart(data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
+            plugins: { legend: { display: false } },
             scales: {
-                x: {
-                    ticks: {
-                        maxRotation: 45,
-                        minRotation: 45,
-                        font: { size: 10 }
-                    }
-                },
-                y: {
-                    beginAtZero: true
-                }
+                x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 10 } } },
+                y: { beginAtZero: true }
             }
         }
     });
@@ -219,17 +267,8 @@ function createOccupancyChart(data) {
             responsive: true,
             maintainAspectRatio: false,
             scales: {
-                y: {
-                    beginAtZero: true,
-                    max: 100
-                },
-                x: {
-                    ticks: {
-                        maxRotation: 45,
-                        minRotation: 45,
-                        font: { size: 10 }
-                    }
-                }
+                y: { beginAtZero: true, max: 100 },
+                x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 10 } } }
             }
         }
     });
@@ -238,10 +277,7 @@ function createOccupancyChart(data) {
 // 3. Busiest Routes by Market Share % - TRUE GRID HEATMAP
 function createMarketShareChart(data) {
     if(!data) data = [];
-    // Sort data by market share
     const sortedData = [...data].sort((a, b) => b.market_share_percent - a.market_share_percent);
-    
-    // Create matrix data points
     const matrixData = sortedData.map((d, index) => ({
         x: 0,
         y: index,
@@ -275,7 +311,8 @@ function createMarketShareChart(data) {
                 borderWidth: 2,
                 width: ({chart}) => (chart.chartArea || {}).width * 0.8,
                 height: ({chart}) => {
-                    const height = ((chart.chartArea || {}).height / (sortedData.length || 1)) - 4;
+                    const count = sortedData.length || 1;
+                    const height = ((chart.chartArea || {}).height / count) - 4;
                     return Math.max(height, 25);
                 }
             }]
@@ -287,48 +324,25 @@ function createMarketShareChart(data) {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
-                        title() {
-                            return '';
-                        },
+                        title: () => '',
                         label(context) {
                             const v = context.dataset.data[context.dataIndex];
-                            return [
-                                `Route: ${v.route}`,
-                                `Market Share: ${v.v}%`,
-                                `Tickets Sold: ${v.tickets ? v.tickets.toLocaleString() : 0}`
-                            ];
+                            return [`Route: ${v.route}`, `Market Share: ${v.v}%`];
                         }
                     }
                 }
             },
             scales: {
-                x: {
-                    display: false,
-                    min: -0.5,
-                    max: 0.5
-                },
+                x: { display: false, min: -0.5, max: 0.5 },
                 y: {
                     type: 'category',
                     labels: sortedData.map(d => d.route),
                     offset: true,
-                    ticks: {
-                        font: { 
-                            size: 11,
-                            weight: 'bold'
-                        },
-                        color: '#333'
-                    },
-                    grid: {
-                        display: false
-                    }
+                    ticks: { font: { size: 11, weight: 'bold' }, color: '#333' },
+                    grid: { display: false }
                 }
             },
-            layout: {
-                padding: {
-                    left: 10,
-                    right: 20
-                }
-            }
+            layout: { padding: { left: 10, right: 20 } }
         }
     });
 }
@@ -349,35 +363,17 @@ function createLeastBusyChart(data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            scales: {
-                y: { beginAtZero: true },
-                x: {
-                    ticks: {
-                        maxRotation: 45,
-                        minRotation: 45,
-                        font: { size: 10 }
-                    }
-                }
-            },
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return `Market Share: ${context.parsed.y}% (${data[context.dataIndex].total_tickets_sold} tickets)`;
-                        }
-                    }
-                }
-            }
+            scales: { y: { beginAtZero: true }, x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 10 } } } },
+            plugins: { tooltip: { callbacks: { label: function(context) { return `Market Share: ${context.parsed.y}%`; } } } }
         }
     });
 }
 
-// 6. Top 3 Most & Least Profitable Routes - SPLIT INTO TWO CHARTS
+// 6. Top 3 Most & Least Profitable Routes
 function createProfitableRoutesChart(topRoutes, leastRoutes) {
     if(!topRoutes) topRoutes = [];
     if(!leastRoutes) leastRoutes = [];
     
-    // Top 3 Most Profitable
     createOrUpdateChart('profitableRoutesChart', {
         type: 'bar',
         data: {
@@ -392,36 +388,14 @@ function createProfitableRoutesChart(topRoutes, leastRoutes) {
             responsive: true,
             maintainAspectRatio: false,
             indexAxis: 'y',
-            scales: {
-                x: { 
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return '$' + (value / 1000000).toFixed(1) + 'M';
-                        }
-                    }
-                }
-            },
+            scales: { x: { beginAtZero: true, ticks: { callback: function(value) { return '$' + (value / 1000000).toFixed(1) + 'M'; } } } },
             plugins: {
-                title: {
-                    display: true,
-                    text: 'Most Profitable Routes',
-                    font: { size: 14, weight: 'bold' },
-                    color: '#4CAF50'
-                },
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return 'Revenue: $' + context.parsed.x.toLocaleString();
-                        }
-                    }
-                }
+                title: { display: true, text: 'Most Profitable Routes', color: '#4CAF50' },
+                legend: { display: false }
             }
         }
     });
     
-    // Top 3 Least Profitable
     createOrUpdateChart('leastProfitableChart', {
         type: 'bar',
         data: {
@@ -436,31 +410,10 @@ function createProfitableRoutesChart(topRoutes, leastRoutes) {
             responsive: true,
             maintainAspectRatio: false,
             indexAxis: 'y',
-            scales: {
-                x: { 
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return '$' + (value / 1000).toFixed(0) + 'K';
-                        }
-                    }
-                }
-            },
+            scales: { x: { beginAtZero: true, ticks: { callback: function(value) { return '$' + (value / 1000).toFixed(0) + 'K'; } } } },
             plugins: {
-                title: {
-                    display: true,
-                    text: 'Least Profitable Routes',
-                    font: { size: 14, weight: 'bold' },
-                    color: '#f44336'
-                },
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return 'Revenue: $' + context.parsed.x.toLocaleString();
-                        }
-                    }
-                }
+                title: { display: true, text: 'Least Profitable Routes', color: '#f44336' },
+                legend: { display: false }
             }
         }
     });
@@ -481,21 +434,7 @@ function createRevenueClassChart(data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { position: 'bottom' },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            let label = context.label || '';
-                            if (label) {
-                                label += ': ';
-                            }
-                            label += '$' + context.parsed.toLocaleString();
-                            return label;
-                        }
-                    }
-                }
-            }
+            plugins: { legend: { position: 'bottom' } }
         }
     });
 }
@@ -516,114 +455,57 @@ function createRevenueClassRouteChart(data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            scales: {
-                y: { beginAtZero: true },
-                x: {
-                    ticks: {
-                        maxRotation: 90,
-                        minRotation: 90,
-                        font: { size: 8 }
-                    }
-                }
-            },
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return 'Revenue: $' + context.parsed.y.toLocaleString();
-                        }
-                    }
-                }
-            }
+            scales: { y: { beginAtZero: true }, x: { ticks: { maxRotation: 90, minRotation: 90, font: { size: 8 } } } },
+            plugins: { legend: { display: false } }
         }
     });
 }
 
 // 8. Aircraft Type by Route
 function createAircraftRouteChart(data) {
-    if(!data) data = [];
+    // Prevent Crash on Empty Data
+    if(!data || data.length === 0) {
+        return; // Simply return, chart canvas remains empty but no crash
+    }
 
-    // 1. We find the highest number of flights to calculate the color intensity
-    // (If the max is 50, then 50 flights = Dark Orange, 1 flight = Light Orange)
     const counts = data.map(d => d.total_flights_on_route);
-    const maxFlights = Math.max(...counts);
+    const maxFlights = Math.max(...counts) || 1; // Prevent div by zero
 
-    // 2. We need to know how many columns (Routes) and rows (Planes) we have
-    // so we can calculate the size of the squares.
     const uniqueRoutes = [...new Set(data.map(d => d.route))];
     const uniquePlanes = [...new Set(data.map(d => d.aircraft_code))];
+    
+    const routeCount = uniqueRoutes.length || 1;
+    const planeCount = uniquePlanes.length || 1;
 
     createOrUpdateChart('aircraftRouteChart', {
-        type: 'matrix', // <--- This requires the script from Step 1
+        type: 'matrix', 
         data: {
             datasets: [{
                 label: 'Flight Density',
                 data: data.map(d => ({
-                    x: d.route,               // Column
-                    y: d.aircraft_code,       // Row
-                    v: d.total_flights_on_route // Value (Heat)
+                    x: d.route,               
+                    y: d.aircraft_code,       
+                    v: d.total_flights_on_route 
                 })),
-                
-                // 3. The Color Logic
                 backgroundColor: function(context) {
                     const value = context.dataset.data[context.dataIndex].v;
-                    // Calculate transparency (alpha). 
-                    // We add 0.15 so even small numbers are visible.
                     const alpha = (value / maxFlights) + 0.15;
-                    return `rgba(255, 152, 0, ${alpha})`; // Orange Color
+                    return `rgba(255, 152, 0, ${alpha})`; 
                 },
-                
                 borderColor: 'rgba(200, 200, 200, 0.5)',
                 borderWidth: 1,
-                
-                // 4. Square Size Logic (The Math)
-                // This calculates: (Chart Width / Number of Routes) - 1 pixel for spacing
-                width: ({chart}) => (chart.chartArea || {}).width / uniqueRoutes.length - 1,
-                height: ({chart}) => (chart.chartArea || {}).height / uniquePlanes.length - 1
+                // Prevents Infinity if width/height is weird
+                width: ({chart}) => ((chart.chartArea || {}).width / routeCount) - 1,
+                height: ({chart}) => ((chart.chartArea || {}).height / planeCount) - 1
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        title: () => '', // No title
-                        label: function(context) {
-                            const d = context.raw;
-                            return `${d.y} on ${d.x}: ${d.v} flights`;
-                        }
-                    }
-                }
-            },
+            plugins: { legend: { display: false } },
             scales: {
-                x: {
-                    type: 'category', // IMPORTANT: Tells the chart to use Text Labels
-                    labels: uniqueRoutes,
-                    ticks: {
-                        display: true,
-                        maxRotation: 90,
-                        minRotation: 90,
-                        font: { size: 9 }
-                    },
-                    grid: {
-                        display: false // Hide grid lines (the squares are the grid!)
-                    }
-                },
-                y: {
-                    type: 'category', // IMPORTANT: Tells the chart to use Text Labels
-                    labels: uniquePlanes,
-                    offset: true,
-                    ticks: {
-                        display: true,
-                        font: { size: 10 }
-                    },
-                    grid: {
-                        display: false
-                    }
-                }
+                x: { type: 'category', labels: uniqueRoutes, ticks: { maxRotation: 90, minRotation: 90, font: { size: 9 } }, grid: { display: false } },
+                y: { type: 'category', labels: uniquePlanes, offset: true, ticks: { font: { size: 10 } }, grid: { display: false } }
             }
         }
     });
@@ -644,16 +526,7 @@ function createDestinationsChart(data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { position: 'bottom' },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return context.label + ': ' + context.parsed + ' arrivals';
-                        }
-                    }
-                }
-            }
+            plugins: { legend: { position: 'bottom' } }
         }
     });
 }
@@ -661,72 +534,27 @@ function createDestinationsChart(data) {
 // 10. Top 10 Planes with Most Mileage
 function createUtilizationChart(data) {
     if(!data) data = [];
-
-    const backgroundColors = [
-        'rgba(255, 99, 132, 0.7)',   // Pink
-        'rgba(54, 162, 235, 0.7)',   // Blue
-        'rgba(255, 206, 86, 0.7)',   // Yellow
-        'rgba(75, 192, 192, 0.7)',   // Teal
-        'rgba(153, 102, 255, 0.7)',  // Purple
-        'rgba(255, 159, 64, 0.7)',   // Orange
-        'rgba(199, 199, 199, 0.7)',  // Grey
-        'rgba(83, 102, 255, 0.7)',   // Indigo
-        'rgba(40, 159, 64, 0.7)',    // Green
-        'rgba(210, 80, 80, 0.7)'     // Red
-    ];
+    const backgroundColors = ['rgba(255, 99, 132, 0.7)', 'rgba(54, 162, 235, 0.7)', 'rgba(255, 206, 86, 0.7)', 'rgba(75, 192, 192, 0.7)', 'rgba(153, 102, 255, 0.7)'];
 
     createOrUpdateChart('utilizationChart', {
-        type: 'polarArea',  // <--- This is the magic change! "Pizza Mode"
+        type: 'polarArea',
         data: {
             labels: data.map(d => `${d.aircraft_code} (${d.aircraft_model})`),
             datasets: [{
                 label: 'Total Mileage',
                 data: data.map(d => d.total_mileage),
-                backgroundColor: backgroundColors, // Use our rainbow colors
+                backgroundColor: backgroundColors,
                 borderWidth: 1
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            layout: {
-                padding: 20 // Gives the chart a little breathing room
-            },
-            scales: {
-                r: {
-                    // This controls the spiderweb lines
-                    grid: {
-                        color: 'rgba(200, 200, 200, 0.3)' 
-                    },
-                    // This controls the numbers (0k, 2000k, 4000k)
-                    ticks: {
-                        display: false // <--- MAGIC FIX: This hides the messy numbers!
-                    },
-                    // This controls the labels around the edge (if you had any)
-                    pointLabels: {
-                        display: false 
-                    }
-                }
-            },
+            layout: { padding: 20 },
+            scales: { r: { grid: { color: 'rgba(200, 200, 200, 0.3)' }, ticks: { display: false }, pointLabels: { display: false } } },
             plugins: {
-                legend: { 
-                    display: true, 
-                    position: 'right', // Keeps your list on the side
-                    labels: { 
-                        font: { size: 11 },
-                        padding: 20
-                    }
-                },
-                tooltip: {
-                    enabled: true,
-                    backgroundColor: 'rgba(0,0,0,0.8)',
-                    callbacks: {
-                        // This makes the pop-up box say "12,000 miles" nicely
-                        label: function(context) {
-                            return ' ' + context.label + ': ' + context.parsed.r.toLocaleString() + ' miles';
-                        }
-                    }
-                }
+                legend: { display: true, position: 'right', labels: { font: { size: 11 }, padding: 20 } },
+                tooltip: { callbacks: { label: function(context) { return ' ' + context.label + ': ' + context.parsed.r.toLocaleString() + ' miles'; } } }
             }
         }
     });
@@ -735,8 +563,7 @@ function createUtilizationChart(data) {
 // Initialize aircraft filter dropdown
 function initializeAircraftFilter(aircraftList) {
     const filterSelect = document.getElementById('aircraftFilter');
-    
-    // Clear loading option
+    if(!filterSelect) return;
     filterSelect.innerHTML = '';
     
     if(!aircraftList || aircraftList.length === 0) {
@@ -746,7 +573,6 @@ function initializeAircraftFilter(aircraftList) {
         return;
     }
     
-    // Add options
     aircraftList.forEach(aircraft => {
         const option = document.createElement('option');
         option.value = aircraft.aircraft_code;
@@ -754,58 +580,44 @@ function initializeAircraftFilter(aircraftList) {
         filterSelect.appendChild(option);
     });
     
-    // Set default if exists
-    if(aircraftList.length > 0) {
-        filterSelect.value = aircraftList[0].aircraft_code;
-    }
+    if(aircraftList.length > 0) filterSelect.value = aircraftList[0].aircraft_code;
     
-    // Add change event listener
     filterSelect.addEventListener('change', async function() {
-        const selectedAircraft = this.value;
-        await loadAircraftRoutes(selectedAircraft);
+        await loadAircraftRoutes(this.value);
     });
 }
 
-// Load routes for selected aircraft
 async function loadAircraftRoutes(aircraftCode) {
     if(!aircraftCode) return;
     const tbody = document.getElementById('su9RoutesBody');
+    if(!tbody) return;
     tbody.innerHTML = '<tr><td colspan="4" class="text-center">Loading...</td></tr>';
     
     try {
         const prefix = useNoSQL ? '/api/nosql' : '/api';
-        // Note: For simplicity, assuming endpoint handles aircraft routes logic or we disable it for NoSQL if complex
-        // Here we attempt to fetch it
         const response = await fetch(`${prefix}/aircraft-routes/${aircraftCode}`);
-        if (!response.ok) throw new Error(`Failed to load routes: ${response.statusText}`);
-        
+        if (!response.ok) throw new Error(`Failed to load routes`);
         const data = await response.json();
         createSU9RoutesTable(data.routes);
-        
     } catch (error) {
         console.error('Error loading aircraft routes:', error);
         tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">Error loading data</td></tr>';
     }
 }
 
-// 11. Routes Taken by Aircraft (Table)
 function createSU9RoutesTable(data) {
     const tbody = document.getElementById('su9RoutesBody');
+    if(!tbody) return;
     tbody.innerHTML = '';
     
     if (!data || data.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center">No data available for this aircraft</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center">No data available</td></tr>';
         return;
     }
     
     data.forEach(row => {
         const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td>${row.flight_id}</td>
-            <td>${row.route}</td>
-            <td>${row.scheduled_departure_time}</td>
-            <td><span class="badge bg-${getStatusColor(row.status)}">${row.status}</span></td>
-        `;
+        tr.innerHTML = `<td>${row.flight_id}</td><td>${row.route}</td><td>${row.scheduled_departure_time}</td><td><span class="badge bg-${getStatusColor(row.status)}">${row.status}</span></td>`;
         tbody.appendChild(tr);
     });
 }

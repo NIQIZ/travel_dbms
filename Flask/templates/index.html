@@ -13,36 +13,18 @@
 <section class="hero-section" id="hero">
     <div class="container" id="homeContainer">
         <div class="row">
-            <div class="container">
+            <div class="col-12">
                 <h1 id="Welcome">WELCOME</h1>
-                <h4>WHAT WOULD YOU LIKE TO DO TODAY?</h4>
-            </div>
-            <div class="container" id="navtable">
-                <button class="tablink" onclick="openOptions('FLIGHT',this)" id="flightTab">FLIGHT</button>
-                <button class="tablink" onclick="openOptions('PERSONNEL',this)" id="personnelTab">BOOKINGS</button>
-                <a class="btn" id="btnCreateBooking" href="{{ url_for('add_booking') }}">ADD NEW BOOKING</a>
-                <button class="tablink" onclick="openOptions('AIRCRAFT',this)" id="aircraftTab">AIRCRAFT</button>
-                <br />
-
-                <div id="FLIGHT" class="tabcontent">
-                    <a class="btn" id="btnCreateFPR" href="{{url_for('index')}}">CREATE FLIGHT ROUTE</a>
-                    <a class="btn" id="btnViewFR" href="{{url_for('index')}}">VIEW FLIGHT ROUTE AND FLIGHT SCHEDULES</a>
-                    <a class="btn" id="btnCreateFS" href="{{url_for('index')}}">CREATE FLIGHT SCHEDULE</a>
-                    <a class="btn" id="btnUpdateFS" href="{{url_for('index')}}">UPDATE FLIGHT SCHEDULE STATUS</a>
-                </div>
-
-                <div id="PERSONNEL" class="tabcontent">
-                    <a class="btn" id="btnCreateFPR" href="{{url_for('index')}}">CREATE FLIGHT PERSONNEL RECORD</a>
-                    <a class="btn" id="btnViewFP" href="{{url_for('index')}}">VIEW ALL PERSONNEL AND FLIGHT ASSIGNED</a>
-                    <a class="btn" id="btnAssignFP" href="{{url_for('index')}}">ASSIGN PERSONNEL TO FLIGHT SCHEDULE</a>
-                    <a class="btn" id="btnUpdateFP" href="{{url_for('index')}}">UPDATE FLIGHT PERSONNEL STATUS</a>
-                </div>
-
-                <div id="AIRCRAFT" class="tabcontent">
-                    <a class="btn" id="btnCreateAirRec" href="{{url_for('index')}}">CREATE AIRCRAFT RECORD</a>
-                    <a class="btn" id="btnViewAir" href="{{url_for('index')}}">VIEW ALL AIRCRAFT AND FLIGHT ASSIGNED</a>
-                    <a class="btn" id="btnAssignAir" href="{{url_for('index')}}">ASSIGN AIRCRAFT TO FLIGHT SCHEDULE</a>
-                    <a class="btn" id="btnAssignAir" href="{{url_for('index')}}">UPDATE AIRCRAFT STATUS</a>
+                <h4>AIRLINE ANALYTICS & MANAGEMENT SYSTEM</h4>
+                
+                <div class="landing-actions">
+                    <button onclick="document.getElementById('dashboard').scrollIntoView({behavior: 'smooth'})" class="btn-landing">
+                        <i class="fas fa-chart-line"></i> View Analytics
+                    </button>
+                    
+                    <a href="{{ url_for('manage') }}" class="btn-landing btn-landing-outline">
+                        <i class="fas fa-database"></i> Manage Database
+                    </a>
                 </div>
             </div>
         </div>
