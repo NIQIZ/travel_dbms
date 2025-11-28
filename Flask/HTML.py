@@ -28,7 +28,8 @@ def get_db_connection():
         if not os.path.exists(SQLITE_DB):
             raise FileNotFoundError(f"Database file not found at: {SQLITE_DB}")
         
-        conn = sqlite3.connect(SQLITE_DB)
+        # Set isolation_level=None for manual transaction control
+        conn = sqlite3.connect(SQLITE_DB, isolation_level=None) 
         conn.row_factory = sqlite3.Row
         return conn
     except Exception as e:
@@ -84,9 +85,9 @@ def extract_json_value(json_str):
 
 # Initialize the database view when app starts
 def init_db():
-    """Initialize database views"""
+    """Initialize database views and indexes"""
     try:
-        print("Initializing database views...")
+        print("Initializing database views and indexes...")
         conn = get_db_connection()
         cursor = conn.cursor()
         
@@ -109,39 +110,38 @@ def init_db():
             CREATE INDEX idx_flights_perf 
             ON flights (status, scheduled_arrival, actual_arrival, departure_airport, arrival_airport);
         """)
-
-        # Additional index for direct route querying
+        
+        # Additional index for direct route querying 
         cursor.execute("DROP INDEX IF EXISTS idx_flights_route_lookup;")
         cursor.execute("""
             CREATE INDEX idx_flights_route_lookup 
             ON flights (departure_airport, arrival_airport);
         """)
 
-        # 2. Index for Occupancy/Demand
+        # 2. Index for Occupancy/Demand 
         cursor.execute("DROP INDEX IF EXISTS idx_seats_aircraft;")
         cursor.execute("CREATE INDEX idx_seats_aircraft ON seats (aircraft_code);")
 
         cursor.execute("DROP INDEX IF EXISTS idx_boarding_flight;")
         cursor.execute("CREATE INDEX idx_boarding_flight ON boarding_passes (flight_id);")
 
-        # 3. Index for Revenue Analysis
+        # 3. Index for Revenue Analysis 
         cursor.execute("DROP INDEX IF EXISTS idx_ticketflights_revenue;")
         cursor.execute("""
             CREATE INDEX idx_ticketflights_revenue 
             ON ticket_flights (flight_id, fare_conditions, amount);
         """)
 
-        # 4. Index for Resource Planning
+        # 4. Index for Resource Planning 
         cursor.execute("DROP INDEX IF EXISTS idx_flights_aircraft_arrival;")
         cursor.execute("""
             CREATE INDEX idx_flights_aircraft_arrival 
             ON flights (aircraft_code, arrival_airport);
         """)
         # ==================================================================
-
-        conn.commit()
-        conn.close()
-        print("[OK] Database views initialized successfully")
+        
+        conn.close() 
+        print("[OK] Database views and indexes initialized successfully")
     except Exception as e:
         print(f"Error initializing database: {e}")
         raise
@@ -156,7 +156,10 @@ def index():
 def attributes():
     return render_template('attributes.html')
 
-# ==================== DASHBOARD API ENDPOINTS (SQL) ====================
+# ==================== DASHBOARD API ENDPOINTS (READ Operations) ====================
+# NOTE: READ operations are not wrapped in explicit BEGIN/COMMIT transactions 
+# because SQLite allows concurrent readers, and the default connection closing 
+# (done via the finally block in the CRUD functions, or automatically here) is sufficient.
 
 @app.route('/api/flight-operations')
 def flight_operations():
@@ -469,10 +472,11 @@ def add_booking():
 def manage():
     return render_template('crudManager.html')
 
-# ==================== SQL CRUD ====================
+# ==================== SQL CRUD (Transaction Managed) ====================
 
 @app.route('/api/flights', methods=['GET'])
 def get_flights():
+    """Get all flights (READ)"""
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
@@ -497,6 +501,7 @@ def get_flights():
 
 @app.route('/api/flights/<int:flight_id>', methods=['GET'])
 def get_flight(flight_id):
+    """Get a single flight by ID (READ)"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -510,24 +515,45 @@ def get_flight(flight_id):
 
 @app.route('/api/flights', methods=['POST'])
 def create_flight():
+    """Create a new flight (WRITE - Transaction Managed)"""
+    conn = None
     try:
         data = request.get_json()
+        required_fields = ['flight_no', 'scheduled_departure', 'scheduled_arrival', 'departure_airport', 'arrival_airport', 'aircraft_code']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        cursor.execute("BEGIN TRANSACTION") # Start Transaction
+        
         cursor.execute("INSERT INTO flights (flight_no, scheduled_departure, scheduled_arrival, departure_airport, arrival_airport, status, aircraft_code, actual_departure, actual_arrival) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (data['flight_no'], data['scheduled_departure'], data['scheduled_arrival'], data['departure_airport'], data['arrival_airport'], data.get('status', 'Scheduled'), data['aircraft_code'], data.get('actual_departure'), data.get('actual_arrival')))
         flight_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
+        
+        conn.commit() # Commit Transaction (Success)
+        
         return jsonify({'message': 'Flight created successfully', 'flight_id': flight_id}), 201
+    
+    except sqlite3.IntegrityError as e:
+        if conn: conn.rollback() # Rollback on failure (Atomicity)
+        return jsonify({'error': f'Database integrity error: {str(e)}'}), 400
     except Exception as e:
+        if conn: conn.rollback() # Rollback on failure (Atomicity)
         return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close() # Close connection immediately (Isolation)
 
 @app.route('/api/flights/<int:flight_id>', methods=['PUT'])
 def update_flight(flight_id):
+    """Update an existing flight (WRITE - Transaction Managed)"""
+    conn = None
     try:
         data = request.get_json()
         conn = get_db_connection()
         cursor = conn.cursor()
+        
         update_fields = []
         values = []
         allowed_fields = ['flight_no', 'scheduled_departure', 'scheduled_arrival', 'departure_airport', 'arrival_airport', 'status', 'aircraft_code', 'actual_departure', 'actual_arrival']
@@ -537,29 +563,69 @@ def update_flight(flight_id):
                 values.append(data[field])
         if not update_fields: return jsonify({'error': 'No fields to update'}), 400
         values.append(flight_id)
+        
+        cursor.execute("BEGIN TRANSACTION") # Start Transaction
+        
         cursor.execute(f"UPDATE flights SET {', '.join(update_fields)} WHERE flight_id = ?", values)
-        conn.commit()
-        conn.close()
+        
+        if cursor.rowcount == 0:
+            conn.rollback() # Rollback if nothing updated
+            return jsonify({'error': 'Flight not found'}), 404
+        
+        conn.commit() # Commit Transaction (Success)
+        
         return jsonify({'message': 'Flight updated successfully'})
+    
+    except sqlite3.IntegrityError as e:
+        if conn: conn.rollback()
+        return jsonify({'error': f'Database integrity error: {str(e)}'}), 400
     except Exception as e:
+        if conn: conn.rollback()
         return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
 
 @app.route('/api/flights/<int:flight_id>', methods=['DELETE'])
 def delete_flight(flight_id):
+    """Delete a flight (WRITE - Transaction Managed)"""
+    conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        cursor.execute("BEGIN TRANSACTION") # Start Transaction
+
+        # Check if flight exists (optional, but good practice)
+        cursor.execute("SELECT flight_id FROM flights WHERE flight_id = ?", (flight_id,))
+        if not cursor.fetchone():
+            conn.rollback()
+            return jsonify({'error': 'Flight not found'}), 404
+            
+        # Delete related records first (Atomicity)
         cursor.execute("DELETE FROM ticket_flights WHERE flight_id = ?", (flight_id,))
         cursor.execute("DELETE FROM boarding_passes WHERE flight_id = ?", (flight_id,))
+        
         cursor.execute("DELETE FROM flights WHERE flight_id = ?", (flight_id,))
-        conn.commit()
-        conn.close()
+        
+        conn.commit() # Commit Transaction (Success)
+        
         return jsonify({'message': 'Flight deleted successfully'})
+    
+    except sqlite3.IntegrityError as e:
+        if conn: conn.rollback()
+        return jsonify({'error': f'Cannot delete flight: {str(e)}'}), 400
     except Exception as e:
+        if conn: conn.rollback()
         return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+
+# ==================== BOOKINGS (TICKETS) CRUD (Transaction Managed) ====================
 
 @app.route('/api/bookings', methods=['GET'])
 def get_bookings():
+    """Get all bookings/tickets (READ)"""
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
@@ -613,6 +679,7 @@ def get_bookings():
 
 @app.route('/api/bookings/<ticket_no>', methods=['GET'])
 def get_booking(ticket_no):
+    """Get a single booking by ticket number (READ)"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -626,25 +693,47 @@ def get_booking(ticket_no):
 
 @app.route('/api/bookings', methods=['POST'])
 def create_booking():
+    """Create a new booking/ticket (WRITE - Transaction Managed)"""
+    conn = None
     try:
         data = request.get_json()
+        required_fields = ['ticket_no', 'book_ref', 'passenger_id', 'passenger_name', 'contact_data']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+                
         conn = get_db_connection()
         cursor = conn.cursor()
+        
         contact_data = data['contact_data']
         if isinstance(contact_data, dict): contact_data = json.dumps(contact_data)
+        
+        cursor.execute("BEGIN TRANSACTION") # Start Transaction
+        
         cursor.execute("INSERT INTO tickets (ticket_no, book_ref, passenger_id, passenger_name, contact_data) VALUES (?, ?, ?, ?, ?)", (data['ticket_no'], data['book_ref'], data['passenger_id'], data['passenger_name'], contact_data))
-        conn.commit()
-        conn.close()
+        
+        conn.commit() # Commit Transaction (Success)
+        
         return jsonify({'message': 'Booking created successfully'}), 201
+    
+    except sqlite3.IntegrityError as e:
+        if conn: conn.rollback()
+        return jsonify({'error': f'Database integrity error: {str(e)}'}), 400
     except Exception as e:
+        if conn: conn.rollback()
         return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
 
 @app.route('/api/bookings/<ticket_no>', methods=['PUT'])
 def update_booking(ticket_no):
+    """Update an existing booking (WRITE - Transaction Managed)"""
+    conn = None
     try:
         data = request.get_json()
         conn = get_db_connection()
         cursor = conn.cursor()
+        
         update_fields = []
         values = []
         allowed_fields = ['passenger_name', 'contact_data']
@@ -654,31 +743,60 @@ def update_booking(ticket_no):
                 if field == 'contact_data' and isinstance(val, dict): val = json.dumps(val)
                 update_fields.append(f"{field} = ?")
                 values.append(val)
-        if not update_fields: return jsonify({'error': 'No fields'}), 400
+        if not update_fields: return jsonify({'error': 'No fields to update'}), 400
         values.append(ticket_no)
+        
+        cursor.execute("BEGIN TRANSACTION") # Start Transaction
+        
         cursor.execute(f"UPDATE tickets SET {', '.join(update_fields)} WHERE ticket_no = ?", values)
-        conn.commit()
-        conn.close()
+        
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return jsonify({'error': 'Booking not found'}), 404
+
+        conn.commit() # Commit Transaction (Success)
+
         return jsonify({'message': 'Booking updated successfully'})
     except Exception as e:
+        if conn: conn.rollback()
         return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
 
 @app.route('/api/bookings/<ticket_no>', methods=['DELETE'])
 def delete_booking(ticket_no):
+    """Delete a booking (WRITE - Transaction Managed)"""
+    conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        cursor.execute("BEGIN TRANSACTION") # Start Transaction
+
+        # Delete related records (Atomicity)
         cursor.execute("DELETE FROM ticket_flights WHERE ticket_no = ?", (ticket_no,))
         cursor.execute("DELETE FROM boarding_passes WHERE ticket_no = ?", (ticket_no,))
+        
         cursor.execute("DELETE FROM tickets WHERE ticket_no = ?", (ticket_no,))
-        conn.commit()
-        conn.close()
+        
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return jsonify({'error': 'Booking not found'}), 404
+
+        conn.commit() # Commit Transaction (Success)
+        
         return jsonify({'message': 'Booking deleted successfully'})
     except Exception as e:
+        if conn: conn.rollback()
         return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+# ==================== AIRCRAFT CRUD (Transaction Managed) ====================
 
 @app.route('/api/aircraft', methods=['GET'])
 def get_aircraft():
+    """Get all aircraft (READ)"""
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
@@ -708,6 +826,7 @@ def get_aircraft():
 
 @app.route('/api/aircraft/<aircraft_code>', methods=['GET'])
 def get_single_aircraft(aircraft_code):
+    """Get a single aircraft by code (READ)"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -724,26 +843,48 @@ def get_single_aircraft(aircraft_code):
 
 @app.route('/api/aircraft', methods=['POST'])
 def create_aircraft():
+    """Create a new aircraft (WRITE - Transaction Managed)"""
+    conn = None
     try:
         data = request.get_json()
+        required_fields = ['aircraft_code', 'model', 'range']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
         conn = get_db_connection()
         cursor = conn.cursor()
+        
         model = data['model']
         if isinstance(model, str): model = json.dumps({"en": model})
         elif isinstance(model, dict): model = json.dumps(model)
+        
+        cursor.execute("BEGIN TRANSACTION") # Start Transaction
+        
         cursor.execute("INSERT INTO aircrafts_data (aircraft_code, model, range) VALUES (?, ?, ?)", (data['aircraft_code'], model, data['range']))
-        conn.commit()
-        conn.close()
+        
+        conn.commit() # Commit Transaction (Success)
+        
         return jsonify({'message': 'Aircraft created successfully'}), 201
+    
+    except sqlite3.IntegrityError as e:
+        if conn: conn.rollback()
+        return jsonify({'error': f'Aircraft code already exists or integrity error: {str(e)}'}), 400
     except Exception as e:
+        if conn: conn.rollback()
         return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
 
 @app.route('/api/aircraft/<aircraft_code>', methods=['PUT'])
 def update_aircraft(aircraft_code):
+    """Update an existing aircraft (WRITE - Transaction Managed)"""
+    conn = None
     try:
         data = request.get_json()
         conn = get_db_connection()
         cursor = conn.cursor()
+        
         update_fields = []
         values = []
         if 'model' in data:
@@ -755,31 +896,61 @@ def update_aircraft(aircraft_code):
         if 'range' in data:
             update_fields.append("range = ?")
             values.append(data['range'])
-        if not update_fields: return jsonify({'error': 'No fields'}), 400
+        
+        if not update_fields: return jsonify({'error': 'No fields to update'}), 400
         values.append(aircraft_code)
+        
+        cursor.execute("BEGIN TRANSACTION") # Start Transaction
+        
         cursor.execute(f"UPDATE aircrafts_data SET {', '.join(update_fields)} WHERE aircraft_code = ?", values)
-        conn.commit()
-        conn.close()
+        
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return jsonify({'error': 'Aircraft not found'}), 404
+
+        conn.commit() # Commit Transaction (Success)
+        
         return jsonify({'message': 'Aircraft updated successfully'})
     except Exception as e:
+        if conn: conn.rollback()
         return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
 
 @app.route('/api/aircraft/<aircraft_code>', methods=['DELETE'])
 def delete_aircraft(aircraft_code):
+    """Delete an aircraft (WRITE - Transaction Managed)"""
+    conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        cursor.execute("BEGIN TRANSACTION") # Start Transaction
+        
+        # Check if aircraft is being used in flights
         cursor.execute("SELECT COUNT(*) FROM flights WHERE aircraft_code = ?", (aircraft_code,))
         if cursor.fetchone()[0] > 0:
-            conn.close()
+            conn.rollback()
             return jsonify({'error': 'Cannot delete assigned aircraft'}), 400
+        
+        # Delete related seats (Atomicity)
         cursor.execute("DELETE FROM seats WHERE aircraft_code = ?", (aircraft_code,))
+        
+        # Delete the aircraft
         cursor.execute("DELETE FROM aircrafts_data WHERE aircraft_code = ?", (aircraft_code,))
-        conn.commit()
-        conn.close()
+        
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return jsonify({'error': 'Aircraft not found'}), 404
+            
+        conn.commit() # Commit Transaction (Success)
+        
         return jsonify({'message': 'Aircraft deleted successfully'})
     except Exception as e:
+        if conn: conn.rollback()
         return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
 
 # === NEW: AIRPORTS CRUD (SQL) ===
 @app.route('/api/airports', methods=['GET'])
@@ -885,7 +1056,7 @@ def delete_airport(airport_code):
     except Exception as e: return jsonify({'error': str(e)}), 500
 
 # =========================================================
-# NOSQL (MONGODB) API ENDPOINTS
+# NOSQL (MONGODB) API ENDPOINTS (No Change Needed for Concurrency as MongoDB handles locking)
 # =========================================================
 
 # --- NoSQL Analytics Endpoints ---
@@ -1150,7 +1321,7 @@ def delete_nosql_flight(id):
 @app.route('/api/nosql/bookings', methods=['GET'])
 def get_nosql_bookings_formatted():
     page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 20))
+    per_page = 20
     
     total = mongo.db.bookings.count_documents({})
     cursor = mongo.db.bookings.find().skip((page-1)*per_page).limit(per_page)
