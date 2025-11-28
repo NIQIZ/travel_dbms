@@ -398,6 +398,14 @@
     <div id="flights-tab" class="tab-content active">
         <div class="controls">
             <div class="search-box">
+                <select id="flights-search-col" class="form-select" style="max-width: 180px; border: 2px solid #e0e0e0;">
+                    <option value="flight_id">Flight ID</option>
+                    <option value="flight_no">Flight No</option>
+                    <option value="route">Route</option>
+                    <option value="scheduled_departure">Scheduled Departure</option>
+                    <option value="status">Status</option>
+                    <option value="aircraft_code">Aircraft</option>
+                </select>
                 <input type="text" id="flights-search" placeholder="Search flights...">
                 <button class="btn btn-primary" onclick="searchFlights()">Search</button>
             </div>
@@ -433,6 +441,13 @@
     <div id="bookings-tab" class="tab-content">
         <div class="controls">
             <div class="search-box">
+                <select id="bookings-search-col" class="form-select" style="max-width: 180px; border: 2px solid #e0e0e0;">
+                    <option value="ticket_no">Ticket No</option>
+                    <option value="book_ref">Book Ref</option>
+                    <option value="passenger_name">Passenger Name</option>
+                    <option value="passenger_id">Passenger ID</option>
+                    <option value="contact_data">Contact</option>
+                </select>
                 <input type="text" id="bookings-search" placeholder="Search bookings...">
                 <button class="btn btn-primary" onclick="searchBookings()">Search</button>
             </div>
@@ -467,6 +482,11 @@
     <div id="aircraft-tab" class="tab-content">
         <div class="controls">
             <div class="search-box">
+                <select id="aircraft-search-col" class="form-select" style="max-width: 180px; border: 2px solid #e0e0e0;">
+                    <option value="aircraft_code">Aircraft Code</option>
+                    <option value="model">Model</option>
+                    <option value="range">Range (km)</option>
+                </select>
                 <input type="text" id="aircraft-search" placeholder="Search aircraft...">
                 <button class="btn btn-primary" onclick="searchAircraft()">Search</button>
             </div>
@@ -499,6 +519,12 @@
     <div id="airports-tab" class="tab-content">
         <div class="controls">
             <div class="search-box">
+                <select id="airports-search-col" class="form-select" style="max-width: 180px; border: 2px solid #e0e0e0;">
+                    <option value="airport_code">Code</option>
+                    <option value="airport_name">Airport Name</option>
+                    <option value="city">City</option>
+                    <option value="timezone">Timezone</option>
+                </select>
                 <input type="text" id="airports-search" placeholder="Search airports...">
                 <button class="btn btn-primary" onclick="searchAirports()">Search</button>
             </div>

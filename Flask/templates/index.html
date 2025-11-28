@@ -87,7 +87,7 @@
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">
-                    <h4>1. Top 5 Least Punctual Routes</h4>
+                    <h4>Routes with Avg Delay > 60 Mins</h4>
                     <div class="chart-container">
                         <canvas id="punctualChart"></canvas>
                     </div>
@@ -95,7 +95,7 @@
             </div>
             <div class="col-md-6">
                 <div class="chart-card">
-                    <h4>5. Top 10 Routes by Flight Volume</h4>
+                    <h4>Top 10 Routes by Flight Volume</h4>
                     <div class="chart-container">
                         <canvas id="routesChart"></canvas>
                     </div>
@@ -106,7 +106,7 @@
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">
-                    <h4>2. Top 10 Routes by Average Occupancy Rate</h4>
+                    <h4>Top 10 Routes by Average Occupancy Rate</h4>
                     <div class="chart-container">
                         <canvas id="occupancyChart"></canvas>
                     </div>
@@ -114,7 +114,7 @@
             </div>
             <div class="col-md-6">
                 <div class="chart-card">
-                    <h4>3. Busiest Routes by Market Share % (Heatmap)</h4>
+                    <h4>Busiest Routes by Market Share % </h4>
                     <div class="chart-container">
                         <canvas id="marketShareChart"></canvas>
                     </div>
@@ -125,7 +125,7 @@
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">
-                    <h4>4. 10 Least Busy Routes by Market Share %</h4>
+                    <h4>10 Least Busy Routes by Market Share %</h4>
                     <div class="chart-container">
                         <canvas id="leastBusyChart"></canvas>
                     </div>
@@ -133,7 +133,7 @@
             </div>
             <div class="col-md-6">
                 <div class="chart-card">
-                    <h4>6a. Top 3 Most Profitable Routes</h4>
+                    <h4>Top 3 Most Profitable Routes</h4>
                     <div class="chart-container">
                         <canvas id="profitableRoutesChart"></canvas>
                     </div>
@@ -144,7 +144,7 @@
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">
-                    <h4>6b. Top 3 Least Profitable Routes</h4>
+                    <h4>Top 3 Least Profitable Routes</h4>
                     <div class="chart-container">
                         <canvas id="leastProfitableChart"></canvas>
                     </div>
@@ -152,7 +152,7 @@
             </div>
             <div class="col-md-6">
                 <div class="chart-card">
-                    <h4>7a. Revenue by Fare Class</h4>
+                    <h4>Revenue by Fare Class</h4>
                     <div class="chart-container">
                         <canvas id="revenueClassChart"></canvas>
                     </div>
@@ -163,7 +163,7 @@
         <div class="row">
             <div class="col-md-12">
                 <div class="chart-card">
-                    <h4>7b. Top 20 Revenue by Fare Class & Route</h4>
+                    <h4>Top 20 Revenue by Fare Class & Route</h4>
                     <div class="chart-container">
                         <canvas id="revenueClassRouteChart"></canvas>
                     </div>
@@ -174,7 +174,12 @@
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">
-                    <h4>8. Top 20 Aircraft Type by Route</h4>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h4 style="margin: 0;">8. Flight Frequency by Route & Aircraft</h4>
+                        <select id="routeSelect" class="form-select form-select-sm" style="width: auto; max-width: 200px;" onchange="renderFilteredAircraftChart()">
+                            <option value="ALL">Show Top 15 Routes</option>
+                        </select>
+                    </div>
                     <div class="chart-container">
                         <canvas id="aircraftRouteChart"></canvas>
                     </div>
@@ -182,7 +187,7 @@
             </div>
             <div class="col-md-6">
                 <div class="chart-card">
-                    <h4>9. Top 3 Most Visited Destinations</h4>
+                    <h4>Top 3 Most Visited Destinations</h4>
                     <div class="chart-container">
                         <canvas id="destinationsChart"></canvas>
                     </div>
@@ -193,7 +198,7 @@
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">
-                    <h4>10. Top 10 Planes with Most Mileage</h4>
+                    <h4>Top 10 Planes with Most Mileage</h4>
                     <div class="chart-container">
                         <canvas id="utilizationChart"></canvas>
                     </div>
@@ -201,26 +206,9 @@
             </div>
             <div class="col-md-6">
                 <div class="chart-card">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h4 style="margin: 0;">11. Routes Taken by Aircraft (Top 50)</h4>
-                        <select id="aircraftFilter" class="form-select form-select-sm" style="width: auto; min-width: 200px;">
-                            <option value="">Loading...</option>
-                        </select>
-                    </div>
-                    <div class="chart-container" style="overflow-y: auto; max-height: 400px;">
-                        <table class="table table-sm table-hover">
-                            <thead class="table-dark" style="position: sticky; top: 0; z-index: 10;">
-                                <tr>
-                                    <th>Flight ID</th>
-                                    <th>Route</th>
-                                    <th>Departure</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="su9RoutesBody">
-                                <tr><td colspan="4" class="text-center">Loading...</td></tr>
-                            </tbody>
-                        </table>
+                    <h4>Avg Delay vs. Cancellations by Aircraft</h4>
+                    <div class="chart-container">
+                        <canvas id="cancellationDelayChart"></canvas>
                     </div>
                 </div>
             </div>

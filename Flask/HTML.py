@@ -72,7 +72,9 @@ def execute_nosql_and_time(collection, pipeline, label="NoSQL Query"):
             pipeline=pipeline,
             explain=True
         )
-        plan_str = json.dumps(explanation)
+        
+        # FIX: Added default=str to handle Binary/ObjectId types
+        plan_str = json.dumps(explanation, default=str)
         
         if "IXSCAN" in plan_str:
             log_data["plan"].append("✅ Used Index Scan (IXSCAN)")
@@ -82,7 +84,8 @@ def execute_nosql_and_time(collection, pipeline, label="NoSQL Query"):
             log_data["plan"].append("ℹ️ Complex Stage (See raw explain)")
             
     except Exception as e:
-        log_data["plan"].append(f"Could not explain plan: {e}")
+        # Improved error logging to see what actually failed
+        log_data["plan"].append(f"Could not explain plan: {str(e)}")
 
     # 2. Measure Execution Time
     start_time = time.perf_counter()
@@ -198,7 +201,19 @@ def flight_operations():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        q1 = "SELECT route, ROUND(AVG((JULIANDAY(SUBSTR(actual_arrival, 1, 19)) - JULIANDAY(SUBSTR(scheduled_arrival, 1, 19))) * 24 * 60), 2) AS avg_delay_mins FROM flight_routes WHERE status = 'Arrived' AND actual_arrival IS NOT NULL AND scheduled_arrival IS NOT NULL AND JULIANDAY(SUBSTR(actual_arrival, 1, 19)) > JULIANDAY(SUBSTR(scheduled_arrival, 1, 19)) GROUP BY route HAVING avg_delay_mins > 0 ORDER BY avg_delay_mins DESC LIMIT 5;"
+        q1 = """
+            SELECT route, 
+            ROUND(AVG((JULIANDAY(SUBSTR(actual_arrival, 1, 19)) - JULIANDAY(SUBSTR(scheduled_arrival, 1, 19))) * 24 * 60), 2) AS avg_delay_mins 
+            FROM flight_routes 
+            WHERE status = 'Arrived' 
+            AND actual_arrival IS NOT NULL 
+            AND scheduled_arrival IS NOT NULL 
+            AND JULIANDAY(SUBSTR(actual_arrival, 1, 19)) > JULIANDAY(SUBSTR(scheduled_arrival, 1, 19)) 
+            GROUP BY route 
+            HAVING avg_delay_mins > 60  -- CHANGED: Filter for > 60 mins
+            ORDER BY avg_delay_mins DESC 
+            LIMIT 50; -- CHANGED: Increased limit to show more routes
+        """
         least_punctual_routes, log1 = execute_and_time(cursor, q1, label="Least Punctual Routes")
         
         q2 = "SELECT COUNT(*) as total_flights, SUM(CASE WHEN status LIKE '%Delayed%' OR status = 'Delayed' THEN 1 ELSE 0 END) as delayed_flights, SUM(CASE WHEN status LIKE '%Cancel%' OR status = 'Cancelled' THEN 1 ELSE 0 END) as cancelled_flights, SUM(CASE WHEN status = 'Arrived' OR status = 'On Time' THEN 1 ELSE 0 END) as ontime_flights FROM flights"
@@ -230,11 +245,11 @@ def passenger_demand():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        q1 = "WITH FlightCapacity AS (SELECT fr.flight_id, fr.route, COUNT(s.seat_no) AS total_seats FROM flight_routes AS fr JOIN seats AS s ON fr.aircraft_code = s.aircraft_code GROUP BY fr.flight_id, fr.route), FlightBookings AS (SELECT flight_id, COUNT(ticket_no) AS booked_seats FROM boarding_passes GROUP BY flight_id) SELECT fc.route, ROUND(AVG((fb.booked_seats * 100.0 / fc.total_seats)), 2) AS avg_occupancy_percent FROM FlightCapacity AS fc JOIN FlightBookings AS fb ON fc.flight_id = fb.flight_id WHERE fc.total_seats > 0 GROUP BY fc.route ORDER BY avg_occupancy_percent DESC LIMIT 10;"
+        q1 = "WITH FlightCapacity AS (SELECT fr.flight_id, fr.route, COUNT(s.seat_no) AS total_seats FROM flight_routes AS fr JOIN seats AS s ON fr.aircraft_code = s.aircraft_code GROUP BY fr.flight_id, fr.route), FlightBookings AS (SELECT flight_id, COUNT(ticket_no) AS booked_seats FROM boarding_passes GROUP BY flight_id) SELECT fc.route, ROUND(AVG((fb.booked_seats * 100.0 / fc.total_seats)), 6) AS avg_occupancy_percent FROM FlightCapacity AS fc JOIN FlightBookings AS fb ON fc.flight_id = fb.flight_id WHERE fc.total_seats > 0 GROUP BY fc.route ORDER BY avg_occupancy_percent DESC LIMIT 10;"
         top_occupancy_routes, log1 = execute_and_time(cursor, q1, label="Passenger Occupancy")
-        q2 = "WITH RouteBookings AS (SELECT fr.route, COUNT(tf.ticket_no) AS total_tickets_sold FROM flight_routes AS fr JOIN ticket_flights AS tf ON fr.flight_id = tf.flight_id GROUP BY fr.route), TotalTickets AS (SELECT CAST(COUNT(ticket_no) AS REAL) AS grand_total FROM ticket_flights) SELECT rb.route, rb.total_tickets_sold, ROUND((rb.total_tickets_sold * 100.0 / tt.grand_total), 2) AS market_share_percent FROM RouteBookings AS rb CROSS JOIN TotalTickets AS tt ORDER BY market_share_percent DESC LIMIT 10;"
+        q2 = "WITH RouteBookings AS (SELECT fr.route, COUNT(tf.ticket_no) AS total_tickets_sold FROM flight_routes AS fr JOIN ticket_flights AS tf ON fr.flight_id = tf.flight_id GROUP BY fr.route), TotalTickets AS (SELECT CAST(COUNT(ticket_no) AS REAL) AS grand_total FROM ticket_flights) SELECT rb.route, rb.total_tickets_sold, ROUND((rb.total_tickets_sold * 100.0 / tt.grand_total), 6) AS market_share_percent FROM RouteBookings AS rb CROSS JOIN TotalTickets AS tt ORDER BY market_share_percent DESC LIMIT 10;"
         busiest_routes_market_share, log2 = execute_and_time(cursor, q2, label="Market Share High")
-        q3 = "WITH RouteBookings AS (SELECT fr.route, COUNT(tf.ticket_no) AS total_tickets_sold FROM flight_routes AS fr JOIN ticket_flights AS tf ON fr.flight_id = tf.flight_id GROUP BY fr.route), TotalTickets AS (SELECT CAST(COUNT(ticket_no) AS REAL) AS grand_total FROM ticket_flights) SELECT rb.route, rb.total_tickets_sold, ROUND((rb.total_tickets_sold * 100.0 / tt.grand_total), 2) AS market_share_percent FROM RouteBookings AS rb CROSS JOIN TotalTickets AS tt WHERE rb.total_tickets_sold > 0 ORDER BY market_share_percent ASC LIMIT 10;"
+        q3 = "WITH RouteBookings AS (SELECT fr.route, COUNT(tf.ticket_no) AS total_tickets_sold FROM flight_routes AS fr JOIN ticket_flights AS tf ON fr.flight_id = tf.flight_id GROUP BY fr.route), TotalTickets AS (SELECT CAST(COUNT(ticket_no) AS REAL) AS grand_total FROM ticket_flights) SELECT rb.route, rb.total_tickets_sold, ROUND((rb.total_tickets_sold * 100.0 / tt.grand_total), 6) AS market_share_percent FROM RouteBookings AS rb CROSS JOIN TotalTickets AS tt WHERE rb.total_tickets_sold > 0 ORDER BY market_share_percent ASC LIMIT 10;"
         least_busy_routes, log3 = execute_and_time(cursor, q3, label="Market Share Low")
         conn.close()
         return jsonify({'top_occupancy_routes': top_occupancy_routes, 'busiest_routes_market_share': busiest_routes_market_share, 'least_busy_routes': least_busy_routes, '_perf': [log1, log2, log3]})
@@ -262,7 +277,7 @@ def resource_planning():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        q1 = "SELECT fr.route, fr.aircraft_code, ad.model AS aircraft_model, COUNT(fr.flight_id) AS total_flights_on_route FROM flight_routes AS fr JOIN aircrafts_data AS ad ON fr.aircraft_code = ad.aircraft_code GROUP BY fr.route, fr.aircraft_code, ad.model ORDER BY total_flights_on_route DESC LIMIT 20;"
+        q1 = "SELECT fr.route, fr.aircraft_code, ad.model AS aircraft_model, COUNT(fr.flight_id) AS total_flights_on_route FROM flight_routes AS fr JOIN aircrafts_data AS ad ON fr.aircraft_code = ad.aircraft_code GROUP BY fr.route, fr.aircraft_code, ad.model ORDER BY total_flights_on_route DESC LIMIT 100;"
         aircraft_by_route_raw, log1 = execute_and_time(cursor, q1, label="Aircraft by Route")
         aircraft_by_route = []
         for row in aircraft_by_route_raw:
@@ -288,12 +303,12 @@ def resource_planning():
         for row in aircraft_list_raw:
             aircraft_list.append({'aircraft_code': row['aircraft_code'], 'aircraft_model': extract_json_value(row['aircraft_model']), 'flight_count': row['flight_count']})
             
-        q5 = "SELECT fr.flight_id, fr.route, SUBSTR(fr.scheduled_departure, 1, 16) AS scheduled_departure_time, fr.status FROM flight_routes AS fr WHERE fr.aircraft_code = 'SU9' ORDER BY fr.scheduled_departure ASC LIMIT 50;"
-        su9_routes, log5 = execute_and_time(cursor, q5, label="SU9 Routes")
-        su9_routes_list = [dict(row) for row in su9_routes] 
-        
-        conn.close()
-        return jsonify({'aircraft_by_route': aircraft_by_route, 'top_destinations': top_destinations, 'aircraft_utilization': aircraft_utilization, 'aircraft_list': aircraft_list, 'su9_routes': su9_routes_list, '_perf': [log1, log2, log3, log4, log5]})
+        q5 = """SELECT ad.model, ROUND(AVG(CASE WHEN f.status = 'Arrived' AND f.actual_arrival IS NOT NULL THEN (JULIANDAY(SUBSTR(f.actual_arrival, 1, 19)) - JULIANDAY(SUBSTR(f.scheduled_arrival, 1, 19))) * 24 * 60 ELSE NULL END), 2) as avg_delay_minutes, SUM(CASE WHEN f.status = 'Cancelled' THEN 1 ELSE 0 END) as total_cancellations FROM flights f JOIN aircrafts_data ad ON f.aircraft_code = ad.aircraft_code
+            GROUP BY ad.model ORDER BY total_cancellations DESC;
+        """
+        cancellation_stats, log5 = execute_and_time(cursor, q5, label="Cancellation Analysis")
+        return jsonify({'aircraft_by_route': aircraft_by_route, 'top_destinations': top_destinations, 'aircraft_utilization': aircraft_utilization, 'aircraft_list': aircraft_list, 'cancellation_stats': cancellation_stats, '_perf': [log1, log2, log3, log4, log5]})
+    
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -318,6 +333,8 @@ def manage(): return render_template('crudManager.html')
 
 # ==================== SQL CRUD (Transaction Managed) ====================
 # (Keeping these exactly as they were)
+def validate_column(col, allowed):
+    return col if col in allowed else allowed[0]
 
 @app.route('/api/flights', methods=['GET'])
 def get_flights():
@@ -325,24 +342,47 @@ def get_flights():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         search = request.args.get('search', '', type=str)
+        column = request.args.get('column', 'flight_no', type=str)
+        
+        allowed_cols = ['flight_id', 'flight_no', 'route', 'scheduled_departure', 'status', 'aircraft_code']
+        safe_col = validate_column(column, allowed_cols)
+
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        # Base Queries
+        count_sql = "SELECT COUNT(*) FROM flights"
+        data_sql = "SELECT * FROM flights"
+        params = []
+
         if search:
-            cursor.execute("SELECT COUNT(*) FROM flights WHERE flight_id LIKE ? OR departure_airport LIKE ? OR arrival_airport LIKE ?", (f'%{search}%', f'%{search}%', f'%{search}%'))
-        else:
-            cursor.execute("SELECT COUNT(*) FROM flights")
+            if safe_col == 'route':
+                # Special logic for Route: Search Departure OR Arrival
+                where_clause = "WHERE departure_airport LIKE ? OR arrival_airport LIKE ?"
+                params = [f'%{search}%', f'%{search}%']
+            else:
+                where_clause = f"WHERE {safe_col} LIKE ?"
+                params = [f'%{search}%']
+            
+            count_sql += " " + where_clause
+            data_sql += " " + where_clause
+        
+        # Execute Count
+        cursor.execute(count_sql, params)
         total = cursor.fetchone()[0]
+
+        # Execute Data Query
         offset = (page - 1) * per_page
-        if search:
-            cursor.execute("SELECT * FROM flights WHERE flight_id LIKE ? OR departure_airport LIKE ? OR arrival_airport LIKE ? ORDER BY scheduled_departure DESC LIMIT ? OFFSET ?", (f'%{search}%', f'%{search}%', f'%{search}%', per_page, offset))
-        else:
-            cursor.execute("SELECT * FROM flights ORDER BY scheduled_departure DESC LIMIT ? OFFSET ?", (per_page, offset))
+        data_sql += " ORDER BY scheduled_departure DESC LIMIT ? OFFSET ?"
+        params.extend([per_page, offset])
+        
+        cursor.execute(data_sql, params)
         flights = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return jsonify({'flights': flights, 'total': total, 'page': page, 'per_page': per_page, 'total_pages': (total + per_page - 1) // per_page})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
+    
 @app.route('/api/flights/<int:flight_id>', methods=['GET'])
 def get_flight(flight_id):
     try:
@@ -443,26 +483,41 @@ def get_bookings():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         search = request.args.get('search', '', type=str)
+        column = request.args.get('column', 'ticket_no', type=str)
+
+        col_map = {
+            'ticket_no': 't.ticket_no',
+            'book_ref': 't.book_ref',
+            'passenger_name': 't.passenger_name',
+            'passenger_id': 't.passenger_id',
+            'contact_data': 't.contact_data'
+        }
+        # Default to ticket_no if invalid column
+        safe_col = col_map.get(column, 't.ticket_no')
+
         conn = get_db_connection()
         cursor = conn.cursor()
-        base_query = "SELECT t.ticket_no, t.book_ref, t.passenger_id, b.book_date, 'Unknown Passenger' as passenger_name, '{}' as contact_data FROM tickets t JOIN bookings b ON t.book_ref = b.book_ref"
+        
+        base_query = "SELECT t.ticket_no, t.book_ref, t.passenger_id, b.book_date, t.passenger_name, t.contact_data FROM tickets t JOIN bookings b ON t.book_ref = b.book_ref"
+        
         if search:
-            cursor.execute("SELECT COUNT(*) FROM tickets t JOIN bookings b ON t.book_ref = b.book_ref WHERE t.ticket_no LIKE ? OR t.book_ref LIKE ?", (f'%{search}%', f'%{search}%'))
+            cursor.execute(f"SELECT COUNT(*) FROM tickets t JOIN bookings b ON t.book_ref = b.book_ref WHERE {safe_col} LIKE ?", (f'%{search}%',))
         else:
             cursor.execute("SELECT COUNT(*) FROM tickets")
         total = cursor.fetchone()[0]
+        
         offset = (page - 1) * per_page
         if search:
-            sql = f"{base_query} WHERE t.ticket_no LIKE ? OR t.book_ref LIKE ? ORDER BY b.book_date DESC LIMIT ? OFFSET ?"
-            cursor.execute(sql, (f'%{search}%', f'%{search}%', per_page, offset))
+            sql = f"{base_query} WHERE {safe_col} LIKE ? ORDER BY b.book_date DESC LIMIT ? OFFSET ?"
+            cursor.execute(sql, (f'%{search}%', per_page, offset))
         else:
             sql = f"{base_query} ORDER BY b.book_date DESC LIMIT ? OFFSET ?"
             cursor.execute(sql, (per_page, offset))
+            
         bookings = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return jsonify({'bookings': bookings, 'total': total, 'page': page, 'per_page': per_page, 'total_pages': (total + per_page - 1) // per_page})
     except Exception as e:
-        print(f"SQL Error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/bookings/<ticket_no>', methods=['GET'])
@@ -560,18 +615,27 @@ def get_aircraft():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         search = request.args.get('search', '', type=str)
+        column = request.args.get('column', 'aircraft_code', type=str)
+
+        # Validate Column
+        allowed = ['aircraft_code', 'model', 'range']
+        safe_col = validate_column(column, allowed)
+
         conn = get_db_connection()
         cursor = conn.cursor()
+        
         if search:
-            cursor.execute("SELECT COUNT(*) FROM aircrafts_data WHERE aircraft_code LIKE ?", (f'%{search}%',))
+            cursor.execute(f"SELECT COUNT(*) FROM aircrafts_data WHERE {safe_col} LIKE ?", (f'%{search}%',))
         else:
             cursor.execute("SELECT COUNT(*) FROM aircrafts_data")
         total = cursor.fetchone()[0]
+        
         offset = (page - 1) * per_page
         if search:
-            cursor.execute("SELECT * FROM aircrafts_data WHERE aircraft_code LIKE ? LIMIT ? OFFSET ?", (f'%{search}%', per_page, offset))
+            cursor.execute(f"SELECT * FROM aircrafts_data WHERE {safe_col} LIKE ? LIMIT ? OFFSET ?", (f'%{search}%', per_page, offset))
         else:
             cursor.execute("SELECT * FROM aircrafts_data LIMIT ? OFFSET ?", (per_page, offset))
+            
         aircraft_raw = cursor.fetchall()
         aircraft = []
         for row in aircraft_raw:
@@ -689,18 +753,26 @@ def get_airports():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         search = request.args.get('search', '', type=str)
+        column = request.args.get('column', 'airport_code', type=str)
+
+        allowed = ['airport_code', 'airport_name', 'city', 'timezone']
+        safe_col = validate_column(column, allowed)
+
         conn = get_db_connection()
         cursor = conn.cursor()
+        
         if search:
-            cursor.execute("SELECT COUNT(*) FROM airports_data WHERE airport_code LIKE ? OR airport_name LIKE ? OR city LIKE ?", (f'%{search}%', f'%{search}%', f'%{search}%'))
+            cursor.execute(f"SELECT COUNT(*) FROM airports_data WHERE {safe_col} LIKE ?", (f'%{search}%',))
         else:
             cursor.execute("SELECT COUNT(*) FROM airports_data")
         total = cursor.fetchone()[0]
+        
         offset = (page - 1) * per_page
         if search:
-            cursor.execute("SELECT * FROM airports_data WHERE airport_code LIKE ? OR airport_name LIKE ? OR city LIKE ? LIMIT ? OFFSET ?", (f'%{search}%', f'%{search}%', f'%{search}%', per_page, offset))
+            cursor.execute(f"SELECT * FROM airports_data WHERE {safe_col} LIKE ? LIMIT ? OFFSET ?", (f'%{search}%', per_page, offset))
         else:
             cursor.execute("SELECT * FROM airports_data LIMIT ? OFFSET ?", (per_page, offset))
+        
         raw_airports = cursor.fetchall()
         airports = []
         for row in raw_airports:
@@ -809,6 +881,7 @@ def delete_airport(airport_code):
 
 @app.route('/api/nosql/flight-operations')
 def nosql_flight_operations():
+    # 1. Overview Metrics (Counts)
     pipeline_overview = [
         {"$group": {
             "_id": None,
@@ -820,24 +893,82 @@ def nosql_flight_operations():
     ]
     overview_stats, log1 = execute_nosql_and_time(mongo.db.flights, pipeline_overview, label="Overview Metrics")
     overview = overview_stats[0] if overview_stats else {"total_flights": 0}
+
+    # 2. Avg Delay Calculation (Time Diff)
+    pipeline_delay = [
+        # Filter for Arrived flights with valid timestamps
+        {"$match": {
+            "status": "Arrived",
+            "actual_arrival": {"$exists": True, "$ne": None},
+            "scheduled_arrival": {"$exists": True, "$ne": None}
+        }},
+        # Calculate difference in milliseconds
+        {"$project": {
+            "delay_ms": {
+                "$subtract": [
+                    {"$toDate": "$actual_arrival"},
+                    {"$toDate": "$scheduled_arrival"}
+                ]
+            }
+        }},
+        # Only consider flights that were actually late (> 0)
+        {"$match": {"delay_ms": {"$gt": 0}}},
+        # Calculate Average
+        {"$group": {
+            "_id": None,
+            "avg_delay_ms": {"$avg": "$delay_ms"}
+        }}
+    ]
+    
+    delay_stats, log_delay = execute_nosql_and_time(mongo.db.flights, pipeline_delay, label="Avg Delay Calc")
+    
+    # Process the delay result (convert ms to minutes)
+    avg_delay_val = 0
+    if delay_stats and len(delay_stats) > 0:
+        avg_ms = delay_stats[0].get('avg_delay_ms', 0)
+        avg_delay_val = round(avg_ms / 60000, 2) # 60000 ms = 1 minute
+
     overview_data = {
         "total_flights": overview.get('total_flights', 0),
         "delayed_flights": overview.get('delayed', 0),
         "cancelled_flights": overview.get('cancelled', 0),
         "ontime_flights": overview.get('ontime', 0),
-        "avg_delay_minutes": 0 
+        "avg_delay_minutes": avg_delay_val # Assigned calculated value
     }
 
+    # 3. Least Punctual Routes (Avg > 60 mins)
     pipeline_punctual = [
-        {"$match": {"status": "Delayed"}},
-        {"$group": {"_id": "$flight_no", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-        {"$limit": 5}
+        {"$match": {
+            "status": "Arrived",
+            "actual_arrival": {"$exists": True, "$ne": None},
+            "scheduled_arrival": {"$exists": True, "$ne": None}
+        }},
+        {"$project": {
+            "route": {"$concat": ["$departure.airport_code", " -> ", "$arrival.airport_code"]},
+            "delay_minutes": {
+                "$divide": [
+                    {"$subtract": [{"$toDate": "$actual_arrival"}, {"$toDate": "$scheduled_arrival"}]},
+                    60000
+                ]
+            }
+        }},
+        # Filter for positive delays first
+        {"$match": {"delay_minutes": {"$gt": 0}}},
+        
+        # Calculate Average per Route
+        {"$group": {"_id": "$route", "avg_delay": {"$avg": "$delay_minutes"}}},
+        
+        # CHANGED: Only show routes where Avg Delay is > 60 Minutes
+        {"$match": {"avg_delay": {"$gt": 60}}},
+        
+        {"$sort": {"avg_delay": -1}},
+        # CHANGED: Increased limit to 50 to show more than just top 5
+        {"$limit": 50}
     ]
     punctual_data_raw, log2 = execute_nosql_and_time(mongo.db.flights, pipeline_punctual, label="Least Punctual")
-    punctual_data = [{"route": str(doc["_id"]), "avg_delay_mins": doc["count"] * 15} for doc in punctual_data_raw]
+    punctual_data = [{"route": doc["_id"], "avg_delay_mins": round(doc["avg_delay"], 2)} for doc in punctual_data_raw]
 
-    return jsonify({'least_punctual_routes': punctual_data, 'overview': overview_data, '_perf': [log1, log2]})
+    return jsonify({'least_punctual_routes': punctual_data, 'overview': overview_data, '_perf': [log1, log_delay, log2]})
 
 @app.route('/api/nosql/route-performance')
 def nosql_route_performance():
@@ -855,7 +986,9 @@ def nosql_route_performance():
 
 @app.route('/api/nosql/resource-planning')
 def nosql_resource_planning():
-    # 1. Aircraft by Route
+    # ---------------------------------------------------------
+    # 1. Aircraft by Route (Chart 8 - Stacked Bar)
+    # ---------------------------------------------------------
     pipeline_aircraft_route = [
         {"$group": {
             "_id": {
@@ -873,11 +1006,13 @@ def nosql_resource_planning():
             "_id": 0
         }},
         {"$sort": {"total_flights_on_route": -1}},
-        {"$limit": 20}
+        {"$limit": 100} # Increased limit for stacked bar
     ]
     aircraft_by_route, log1 = execute_nosql_and_time(mongo.db.flights, pipeline_aircraft_route, label="Aircraft by Route")
 
-    # 2. Top Destinations
+    # ---------------------------------------------------------
+    # 2. Top Destinations (Chart 9)
+    # ---------------------------------------------------------
     pipeline_destinations = [
         {"$group": {
             "_id": {"code": "$arrival.airport_code", "city": "$arrival.city"},
@@ -894,7 +1029,9 @@ def nosql_resource_planning():
     ]
     top_destinations, log2 = execute_nosql_and_time(mongo.db.flights, pipeline_destinations, label="Top Destinations")
 
-    # 3. Aircraft Utilization
+    # ---------------------------------------------------------
+    # 3. Aircraft Utilization (Chart 10)
+    # ---------------------------------------------------------
     pipeline_utilization = [
         {"$match": {"status": "Arrived"}},
         {"$group": {
@@ -920,7 +1057,9 @@ def nosql_resource_planning():
     ]
     aircraft_utilization, log3 = execute_nosql_and_time(mongo.db.flights, pipeline_utilization, label="Aircraft Utilization")
 
-    # 4. Dropdown List
+    # ---------------------------------------------------------
+    # 4. Aircraft List (For Filter Dropdowns if needed)
+    # ---------------------------------------------------------
     pipeline_list = [
         {"$group": {"_id": {"code": "$aircraft.code", "model": "$aircraft.model"}, "count": {"$sum": 1}}},
         {"$project": {"aircraft_code": "$_id.code", "aircraft_model": "$_id.model", "flight_count": "$count", "_id": 0}},
@@ -928,38 +1067,300 @@ def nosql_resource_planning():
     ]
     aircraft_list, log4 = execute_nosql_and_time(mongo.db.flights, pipeline_list, label="Aircraft List")
 
+    # ---------------------------------------------------------
+    # 5. Cancellation & Delay Analysis (Chart 11 - NEW)
+    # ---------------------------------------------------------
+    pipeline_cancel = [
+        {"$group": {
+            "_id": "$aircraft.code",
+            "model": {"$first": "$aircraft.model"},
+            # Logic: If Arrived, calculate time diff. If Cancelled, ignore for delay.
+            "total_delay_ms": {
+                "$sum": {
+                    "$cond": [
+                        {"$and": [{"$eq": ["$status", "Arrived"]}, {"$ne": ["$actual_arrival", None]}]},
+                        {"$subtract": [{"$toDate": "$actual_arrival"}, {"$toDate": "$scheduled_arrival"}]},
+                        0
+                    ]
+                }
+            },
+            "arrived_count": {
+                "$sum": {"$cond": [{"$eq": ["$status", "Arrived"]}, 1, 0]}
+            },
+            "cancelled_count": {
+                "$sum": {"$cond": [{"$eq": ["$status", "Cancelled"]}, 1, 0]}
+            }
+        }},
+        {"$project": {
+            "model": 1,
+            "total_cancellations": "$cancelled_count",
+            # Avoid division by zero
+            "avg_delay_minutes": {
+                "$cond": [
+                    {"$gt": ["$arrived_count", 0]},
+                    {"$round": [{"$divide": [{"$divide": ["$total_delay_ms", "$arrived_count"]}, 60000]}, 2]},
+                    0
+                ]
+            },
+            "_id": 0
+        }},
+        {"$sort": {"total_cancellations": -1}}
+    ]
+    cancellation_stats, log5 = execute_nosql_and_time(mongo.db.flights, pipeline_cancel, label="Cancellation Analysis")
+
     return jsonify({
         'aircraft_by_route': aircraft_by_route,
         'top_destinations': top_destinations,
         'aircraft_utilization': aircraft_utilization,
         'aircraft_list': aircraft_list,
-        'su9_routes': [],
+        'cancellation_stats': cancellation_stats,
+        '_perf': [log1, log2, log3, log4, log5]
+    })
+
+@app.route('/api/nosql/passenger-demand')
+def nosql_passenger_demand():
+    # ==================================================================
+    # SECTION A: OCCUPANCY RATE (Based on BOARDING PASSES / Flown)
+    # ==================================================================
+    
+    # 1. Get Capacity per Aircraft
+    ac_seats = {}
+    ac_cursor = mongo.db.aircrafts.find({}, {"seats": 1})
+    for ac in ac_cursor:
+        seats = ac.get('seats', [])
+        ac_seats[ac['_id']] = len(seats)
+
+    # 2. Get Booked Count (FILTER: MUST HAVE BOARDING PASS)
+    pipeline_flown_counts = [
+        {"$unwind": "$tickets"},
+        {"$unwind": "$tickets.flight_legs"},
+        # CRITICAL: Only count if they actually boarded (Occupancy logic)
+        {"$match": {"tickets.flight_legs.boarding_pass": {"$exists": True}}}, 
+        {"$group": {
+            "_id": "$tickets.flight_legs.flight_id", 
+            "count": {"$sum": 1}
+        }}
+    ]
+    flown_res, log_occ = execute_nosql_and_time(mongo.db.bookings, pipeline_flown_counts, "Occupancy: Count Flown")
+    
+    flown_map = {}
+    for b in flown_res:
+        flown_map[b['_id']] = b['count']
+
+    # 3. Calculate Occupancy % per Route
+    flights_cursor = mongo.db.flights.find({}, {
+        "aircraft.code": 1, 
+        "departure.airport_code": 1, 
+        "arrival.airport_code": 1
+    })
+
+    route_stats = {} 
+    for f in flights_cursor:
+        flight_id = f['_id'] 
+        ac_code = f.get('aircraft', {}).get('code')
+        dep = f.get('departure', {}).get('airport_code')
+        arr = f.get('arrival', {}).get('airport_code')
+        
+        if dep and arr and ac_code:
+            route = f"{dep} -> {arr}"
+            capacity = ac_seats.get(ac_code, 0)
+            # Use FLOWN count here
+            flown = flown_map.get(flight_id, 0)
+            
+            if capacity > 0 and flown > 0:
+                occupancy = (flown / capacity) * 100
+                if route not in route_stats: route_stats[route] = []
+                route_stats[route].append(min(occupancy, 100.0))
+
+    final_occupancy = []
+    for route, occ_list in route_stats.items():
+        avg_occ = sum(occ_list) / len(occ_list)
+        final_occupancy.append({"route": route, "avg_occupancy_percent": round(avg_occ, 2)})
+
+    final_occupancy.sort(key=lambda x: x['avg_occupancy_percent'], reverse=True)
+    top_10_occupancy = final_occupancy[:10]
+
+    # ==================================================================
+    # SECTION B: MARKET SHARE (Based on TICKETS SOLD / Sales)
+    # ==================================================================
+    
+    # 1. Calculate Grand Total of TICKETS SOLD (Ignore Boarding Passes)
+    ticket_count_pipeline = [
+        {"$unwind": "$tickets"},
+        {"$unwind": "$tickets.flight_legs"},
+        # CRITICAL: No match stage here! We count ALL sold tickets.
+        {"$count": "total"}
+    ]
+    t_res = list(mongo.db.bookings.aggregate(ticket_count_pipeline))
+    grand_total_tickets = t_res[0]['total'] if t_res else 1
+
+    # 2. Busiest Routes Pipeline
+    pipeline_market_share = [
+        {"$unwind": "$tickets"},
+        {"$unwind": "$tickets.flight_legs"},
+        # CRITICAL: No match stage here either!
+        {"$group": {
+            "_id": "$tickets.flight_legs.route",
+            "count": {"$sum": 1}
+        }},
+        {"$project": {
+            "route": "$_id",
+            "total_tickets_sold": "$count",
+            "market_share_percent": {"$round": [{"$multiply": [{"$divide": ["$count", grand_total_tickets]}, 100]}, 6]}, # Using 6 precision
+            "_id": 0
+        }},
+        {"$sort": {"market_share_percent": -1}},
+        {"$limit": 10}
+    ]
+    busiest_routes, log1 = execute_nosql_and_time(mongo.db.bookings, pipeline_market_share, label="Market Share High")
+
+    # 3. Least Busy Routes Pipeline
+    pipeline_least_busy = [
+        {"$unwind": "$tickets"},
+        {"$unwind": "$tickets.flight_legs"},
+        {"$group": {
+            "_id": "$tickets.flight_legs.route",
+            "count": {"$sum": 1}
+        }},
+        {"$project": {
+            "route": "$_id",
+            "market_share_percent": {"$round": [{"$multiply": [{"$divide": ["$count", grand_total_tickets]}, 100]}, 6]}, # Using 6 precision
+            "_id": 0
+        }},
+        # Sort by percent ASC, then route name to ensure consistent "Bottom 10"
+        {"$sort": {"market_share_percent": 1, "route": 1}},
+        {"$limit": 10}
+    ]
+    least_busy, log2 = execute_nosql_and_time(mongo.db.bookings, pipeline_least_busy, label="Market Share Low")
+
+    return jsonify({
+        'top_occupancy_routes': top_10_occupancy, 
+        'busiest_routes_market_share': busiest_routes, 
+        'least_busy_routes': least_busy, 
+        '_perf': [log_occ, log1, log2]
+    })
+
+@app.route('/api/nosql/revenue-analysis')
+def nosql_revenue_analysis():
+    # 1. Revenue by Fare Class
+    pipeline_class = [
+        {"$unwind": "$tickets"},
+        {"$unwind": "$tickets.flight_legs"},
+        {"$group": {
+            "_id": "$tickets.flight_legs.fare_conditions",
+            "total": {"$sum": "$tickets.flight_legs.amount"}
+        }},
+        {"$project": {
+            "fare_conditions": "$_id",
+            "total_revenue_by_class": "$total",
+            "_id": 0
+        }}
+    ]
+    rev_by_class, log1 = execute_nosql_and_time(mongo.db.bookings, pipeline_class, label="Revenue by Class")
+
+    # 2. Top Revenue Routes
+    pipeline_top_routes = [
+        {"$unwind": "$tickets"},
+        {"$unwind": "$tickets.flight_legs"},
+        {"$group": {
+            "_id": "$tickets.flight_legs.route",
+            "total": {"$sum": "$tickets.flight_legs.amount"}
+        }},
+        {"$sort": {"total": -1}},
+        {"$limit": 3},
+        {"$project": {"route": "$_id", "total_revenue": "$total", "_id": 0}}
+    ]
+    top_rev, log2 = execute_nosql_and_time(mongo.db.bookings, pipeline_top_routes, label="Top Revenue Routes")
+
+    # 3. Least Revenue Routes
+    pipeline_low_routes = [
+        {"$unwind": "$tickets"},
+        {"$unwind": "$tickets.flight_legs"},
+        {"$group": {
+            "_id": "$tickets.flight_legs.route",
+            "total": {"$sum": "$tickets.flight_legs.amount"}
+        }},
+        {"$sort": {"total": 1}},
+        {"$limit": 3},
+        {"$project": {"route": "$_id", "total_revenue": "$total", "_id": 0}}
+    ]
+    low_rev, log3 = execute_nosql_and_time(mongo.db.bookings, pipeline_low_routes, label="Least Revenue Routes")
+
+    # 4. Revenue by Class & Route
+    pipeline_complex = [
+        {"$unwind": "$tickets"},
+        {"$unwind": "$tickets.flight_legs"},
+        {"$group": {
+            "_id": {
+                "route": "$tickets.flight_legs.route",
+                "cond": "$tickets.flight_legs.fare_conditions"
+            },
+            "total": {"$sum": "$tickets.flight_legs.amount"}
+        }},
+        {"$sort": {"total": -1}},
+        {"$limit": 20},
+        {"$project": {
+            "route": "$_id.route",
+            "fare_conditions": "$_id.cond",
+            "total_revenue_by_class": "$total",
+            "_id": 0
+        }}
+    ]
+    complex_rev, log4 = execute_nosql_and_time(mongo.db.bookings, pipeline_complex, label="Rev by Route & Class")
+
+    return jsonify({
+        'revenue_by_class': rev_by_class, 
+        'top_revenue_routes': top_rev, 
+        'least_revenue_routes': low_rev, 
+        'revenue_by_class_route': complex_rev, 
         '_perf': [log1, log2, log3, log4]
     })
 
-# Stubs for unused charts
-@app.route('/api/nosql/passenger-demand')
-def nosql_passenger_demand(): return jsonify({'top_occupancy_routes': [], 'busiest_routes_market_share': [], 'least_busy_routes': [], '_perf': []})
-
-@app.route('/api/nosql/revenue-analysis')
-def nosql_revenue_analysis(): return jsonify({'revenue_by_class': [], 'top_revenue_routes': [], 'least_revenue_routes': [], 'revenue_by_class_route': [], '_perf': []})
-
 @app.route('/api/nosql/aircraft-routes/<aircraft_code>')
 def nosql_get_aircraft_routes(aircraft_code):
-    pipeline = [
-        {"$match": {"aircraft.code": aircraft_code}},
-        {"$project": {
-            "flight_id": {"$toString": "$_id"},
-            "route": {"$concat": ["$departure.airport_code", " -> ", "$arrival.airport_code"]},
-            "scheduled_departure_time": {"$substr": ["$scheduled_departure", 0, 16]}, 
-            "status": 1,
-            "_id": 0
-        }},
-        {"$sort": {"scheduled_departure_time": 1}},
-        {"$limit": 50}
-    ]
-    routes, log1 = execute_nosql_and_time(mongo.db.flights, pipeline, label="SU9 Routes")
-    return jsonify({'routes': routes})
+    try:
+        pipeline = [
+            # 1. MATCH: Filter by Aircraft Code
+            {"$match": {
+                "aircraft.code": aircraft_code
+            }},
+            # 2. PROJECT: Convert to strings immediately to prevent type errors
+            {"$project": {
+                "flight_id": {"$toString": "$_id"},
+                # Handle potential missing/null airport codes safely
+                "dep_code": {"$ifNull": ["$departure.airport_code", "???"]},
+                "arr_code": {"$ifNull": ["$arrival.airport_code", "???"]},
+                # Convert date to string first, so $substr never crashes
+                "sched_dep_str": {"$ifNull": [{"$toString": "$scheduled_departure"}, ""]},
+                "status": {"$ifNull": ["$status", "Unknown"]},
+                "_id": 0
+            }},
+            # 3. FORMAT: Construct the final fields
+            {"$project": {
+                "flight_id": 1,
+                "route": {"$concat": ["$dep_code", " -> ", "$arr_code"]},
+                "scheduled_departure_time": {
+                    "$cond": {
+                        "if": {"$gte": [{"$strLenCP": "$sched_dep_str"}, 16]},
+                        "then": {"$substrCP": ["$sched_dep_str", 0, 16]},
+                        "else": "$sched_dep_str"
+                    }
+                },
+                "status": 1
+            }},
+            {"$sort": {"scheduled_departure_time": 1}},
+            {"$limit": 50}
+        ]
+        
+        # BYPASSING execute_nosql_and_time to prevent logger crashes
+        # We run the aggregate directly to ensure data loads
+        routes = list(mongo.db.flights.aggregate(pipeline))
+        
+        return jsonify({'routes': routes})
+
+    except Exception as e:
+        print(f"Error in nosql_get_aircraft_routes: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # --- NoSQL CRUD Endpoints ---
 
@@ -968,12 +1369,32 @@ def get_nosql_flights():
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
     search = request.args.get('search', '')
+    column = request.args.get('column', 'flight_no')
+    
     query = {}
     if search:
-        # IMPROVEMENT: Use Text Search instead of Regex
-        query = {"$text": {"$search": search}}
+        if column == 'flight_id':
+             # Try to search as string first, exact match usually for IDs
+             query = {'_id': int(search) if search.isdigit() else search}
+        elif column == 'route':
+            # Search Departure OR Arrival code
+            query = {
+                "$or": [
+                    {"departure.airport_code": {"$regex": search, "$options": "i"}},
+                    {"arrival.airport_code": {"$regex": search, "$options": "i"}}
+                ]
+            }
+        else:
+            # Map simple names to nested document paths
+            db_field = column
+            if column == 'aircraft_code': db_field = 'aircraft.code'
+            
+            # Use regex for partial string match
+            query = {db_field: {"$regex": search, "$options": "i"}}
+        
     total = mongo.db.flights.count_documents(query)
     cursor = mongo.db.flights.find(query).skip((page-1)*per_page).limit(per_page)
+    
     flights = []
     for doc in cursor:
         flights.append({
@@ -1031,8 +1452,20 @@ def delete_nosql_flight(id):
 def get_nosql_bookings_formatted():
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
-    total = mongo.db.bookings.count_documents({})
-    cursor = mongo.db.bookings.find().skip((page-1)*per_page).limit(per_page)
+    search = request.args.get('search', '')
+    column = request.args.get('column', 'ticket_no')
+    
+    query = {}
+    if search:
+        if column == 'book_ref':
+            query = {'_id': {"$regex": search, "$options": "i"}}
+        else:
+            # All other fields (ticket_no, passenger_name, etc) are inside 'tickets' array
+            query = {f'tickets.{column}': {"$regex": search, "$options": "i"}}
+
+    total = mongo.db.bookings.count_documents(query)
+    cursor = mongo.db.bookings.find(query).skip((page-1)*per_page).limit(per_page)
+    
     output = []
     for b in cursor:
         tickets = b.get('tickets', [])
@@ -1040,9 +1473,9 @@ def get_nosql_bookings_formatted():
         output.append({
             'ticket_no': first_ticket.get('ticket_no', 'N/A'),
             'book_ref': b.get('_id'),
-            'passenger_name': first_ticket.get('passenger_name', 'Unknown'), # Use stored name
+            'passenger_name': first_ticket.get('passenger_name', 'Unknown'),
             'passenger_id': first_ticket.get('passenger_id', 'N/A'),
-            'contact_data': '{}'
+            'contact_data': first_ticket.get('contact_data', '{}')
         })
     return jsonify({'bookings': output, 'total': total, 'page': page, 'total_pages': (total + per_page - 1) // per_page})
 
@@ -1097,14 +1530,22 @@ def delete_nosql_booking(ticket_no):
         
     return jsonify({'message': 'Ticket deleted from booking'})
 
-# === End NoSQL Booking CRUD ===
-
 @app.route('/api/nosql/aircraft', methods=['GET'])
 def get_nosql_aircraft():
     page = int(request.args.get('page', 1))
     per_page = 20
-    total = mongo.db.aircrafts.count_documents({})
-    cursor = mongo.db.aircrafts.find().skip((page-1)*per_page).limit(per_page)
+    search = request.args.get('search', '')
+    column = request.args.get('column', 'aircraft_code')
+
+    query = {}
+    if search:
+        db_field = column
+        if column == 'aircraft_code': db_field = '_id' # ID is the code in our NoSQL schema
+        query = {db_field: {"$regex": search, "$options": "i"}}
+
+    total = mongo.db.aircrafts.count_documents(query)
+    cursor = mongo.db.aircrafts.find(query).skip((page-1)*per_page).limit(per_page)
+    
     aircraft = []
     for doc in cursor:
         aircraft.append({
@@ -1140,11 +1581,18 @@ def get_nosql_airports():
     page = int(request.args.get('page', 1))
     per_page = 20
     search = request.args.get('search', '')
+    column = request.args.get('column', 'airport_code')
+
     query = {}
     if search:
-        query = {"$or": [{"_id": {"$regex": search, "$options": "i"}}, {"airport_name": {"$regex": search, "$options": "i"}}, {"city": {"$regex": search, "$options": "i"}}]}
+        db_field = column
+        if column == 'airport_code': db_field = '_id'
+        
+        query = {db_field: {"$regex": search, "$options": "i"}}
+        
     total = mongo.db.airports.count_documents(query)
     cursor = mongo.db.airports.find(query).skip((page-1)*per_page).limit(per_page)
+    
     airports = []
     for doc in cursor:
         airports.append({

@@ -48,13 +48,16 @@ function switchTab(tab) {
 }
 
 // Load data based on current tab
-async function loadData(search = '') {
+async function loadData(search = '', column = '') {
     const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
     const endpoint = `${prefix}/${currentTab}`;
+    
+    // Add column to params
     const params = new URLSearchParams({
         page: currentPage,
         per_page: 20,
-        search: search
+        search: search,
+        column: column 
     });
     
     try {
@@ -71,7 +74,6 @@ async function loadData(search = '') {
             renderAircraft(data.aircraft);
             renderPagination('aircraft', data);
         } else if (currentTab === 'airports') {
-            // NEW AIRPORT LOGIC
             renderAirports(data.airports);
             renderPagination('airports', data);
         }
@@ -206,27 +208,30 @@ function changePage(page) {
 // Search functions
 function searchFlights() {
     const search = document.getElementById('flights-search').value;
+    const col = document.getElementById('flights-search-col').value;
     currentPage = 1;
-    loadData(search);
+    loadData(search, col);
 }
 
 function searchBookings() {
     const search = document.getElementById('bookings-search').value;
+    const col = document.getElementById('bookings-search-col').value;
     currentPage = 1;
-    loadData(search);
+    loadData(search, col);
 }
 
 function searchAircraft() {
     const search = document.getElementById('aircraft-search').value;
+    const col = document.getElementById('aircraft-search-col').value;
     currentPage = 1;
-    loadData(search);
+    loadData(search, col);
 }
 
-// NEW: Search Airports
 function searchAirports() {
     const search = document.getElementById('airports-search').value;
+    const col = document.getElementById('airports-search-col').value;
     currentPage = 1;
-    loadData(search);
+    loadData(search, col);
 }
 
 // Modal functions

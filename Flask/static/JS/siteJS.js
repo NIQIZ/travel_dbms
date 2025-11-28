@@ -76,25 +76,36 @@ function logPerformance(logs) {
         const isIndexUsed = planStr.includes('USING INDEX') || planStr.includes('COVERING INDEX') || planStr.includes('IXSCAN');
         const isScan = planStr.includes('SCAN TABLE') || planStr.includes('COLLSCAN');
         
-        let tagClass = '';
-        let tagText = 'QUERY';
+        // 1. Determine Scan/Index Tag
+        let methodTagClass = '';
+        let methodTagText = 'QUERY';
         
         if (isIndexUsed) {
-            tagClass = 'tag-index';
-            tagText = 'INDEXED';
+            methodTagClass = 'tag-index';
+            methodTagText = 'INDEXED';
         } else if (isScan) {
-            tagClass = 'tag-scan';
-            tagText = 'SCAN';
+            methodTagClass = 'tag-scan';
+            methodTagText = 'SCAN';
         }
-        
+
+        // 2. Determine DB Type Tag (SQL vs NoSQL)
+        const isNoSQL = log.type === 'NoSQL';
+        const dbTypeColor = isNoSQL ? '#4CAF50' : '#2196F3'; // Green for NoSQL, Blue for SQL
+        const dbTypeText = log.type || 'SYSTEM';
+
+        // 3. Create the Entry
         const entry = document.createElement('div');
-        entry.className = `log-entry ${log.type ? log.type.toLowerCase() : 'system'}`;
+        // Add specific class for CSS border styling
+        entry.className = `log-entry ${isNoSQL ? 'nosql' : 'sql'}`;
         
         let planHtml = log.plan ? log.plan.map(p => `<div>${p}</div>`).join('') : '';
         
         entry.innerHTML = `
             <span class="log-title">
-                <span class="log-tag ${tagClass}">${tagText}</span>
+                <span class="log-tag" style="background-color: ${dbTypeColor}; color: white;">${dbTypeText}</span>
+                
+                <span class="log-tag ${methodTagClass}">${methodTagText}</span>
+                
                 ${log.label}
             </span>
             <span class="log-time">${log.duration} ms</span>
@@ -177,13 +188,86 @@ async function loadDashboardData() {
             safeRender(createDestinationsChart, resources.top_destinations, "Destinations");
             safeRender(createUtilizationChart, resources.aircraft_utilization, "Utilization");
             
-            if(resources.aircraft_list) initializeAircraftFilter(resources.aircraft_list);
-            if(resources.su9_routes) createSU9RoutesTable(resources.su9_routes);
+            // NEW: Call the new chart function using the new data key
+            if(resources.cancellation_stats) {
+                createCancellationDelayChart(resources.cancellation_stats);
+            }
         }
         
     } catch (error) {
         console.error('CRITICAL ERROR loading dashboard:', error);
     }
+}
+
+function createCancellationDelayChart(data) {
+    if(!data) data = [];
+
+    // Helper to extract JSON model name if needed
+    const labels = data.map(d => {
+        try {
+            // Handle cases where model might still be a JSON string
+            return JSON.parse(d.model).en; 
+        } catch(e) { 
+            return d.model || d.aircraft_model; 
+        }
+    });
+
+    createOrUpdateChart('cancellationDelayChart', {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Avg Delay (Minutes)',
+                    data: data.map(d => d.avg_delay_minutes),
+                    backgroundColor: 'rgba(54, 162, 235, 0.6)', // Blue Bars
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    borderWidth: 1,
+                    order: 2,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Total Cancellations',
+                    data: data.map(d => d.total_cancellations),
+                    borderColor: '#FF5722', // Orange Line
+                    backgroundColor: '#FF5722',
+                    type: 'line',
+                    tension: 0.4,
+                    borderWidth: 3,
+                    order: 1,
+                    yAxisID: 'y1' // Use Right Axis
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            plugins: {
+                legend: { position: 'top' }
+            },
+            scales: {
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    title: { display: true, text: 'Avg Delay (min)' },
+                    grid: { drawOnChartArea: true }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    title: { display: true, text: 'Cancellations', color: '#FF5722' },
+                    grid: { drawOnChartArea: false }, // Prevent grid clutter
+                    beginAtZero: true
+                }
+            }
+        }
+    });
 }
 
 function updateKeyMetrics(overview) {
@@ -277,72 +361,46 @@ function createOccupancyChart(data) {
 // 3. Busiest Routes by Market Share % - TRUE GRID HEATMAP
 function createMarketShareChart(data) {
     if(!data) data = [];
+
+    // Sort Descending (Highest to Lowest) because this is "Busiest Routes"
     const sortedData = [...data].sort((a, b) => b.market_share_percent - a.market_share_percent);
-    const matrixData = sortedData.map((d, index) => ({
-        x: 0,
-        y: index,
-        v: d.market_share_percent,
-        route: d.route,
-        tickets: d.total_tickets_sold
-    }));
-    
-    let maxShare = 0, minShare = 0;
-    if(sortedData.length > 0) {
-        maxShare = Math.max(...sortedData.map(d => d.market_share_percent));
-        minShare = Math.min(...sortedData.map(d => d.market_share_percent));
-    }
     
     createOrUpdateChart('marketShareChart', {
-        type: 'matrix',
+        type: 'bar',
         data: {
+            labels: sortedData.map(d => d.route),
             datasets: [{
-                label: 'Market Share %',
-                data: matrixData,
-                backgroundColor(context) {
-                    if (!context.dataset.data[context.dataIndex]) return 'rgba(33, 150, 243, 0)';
-                    const value = context.dataset.data[context.dataIndex].v;
-                    const intensity = (value - minShare) / (maxShare - minShare || 1);
-                    const r = Math.round(33 + (200 - 33) * (1 - intensity));
-                    const g = Math.round(150 + (230 - 150) * (1 - intensity));
-                    const b = 243;
-                    return `rgba(${r}, ${g}, ${b}, ${0.5 + intensity * 0.5})`;
-                },
-                borderColor: 'rgba(255, 255, 255, 0.8)',
-                borderWidth: 2,
-                width: ({chart}) => (chart.chartArea || {}).width * 0.8,
-                height: ({chart}) => {
-                    const count = sortedData.length || 1;
-                    const height = ((chart.chartArea || {}).height / count) - 4;
-                    return Math.max(height, 25);
-                }
+                label: 'Market Share (%)',
+                data: sortedData.map(d => d.market_share_percent),
+                // Using Blue to differentiate "Busiest" from "Least Busy" (Orange)
+                backgroundColor: '#2196F3',
+                borderColor: '#1976D2',
+                borderWidth: 1
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
+            scales: { 
+                y: { 
+                    beginAtZero: true,
+                    title: { display: true, text: 'Market Share (%)' }
+                }, 
+                x: { 
+                    // Angled labels just like the "Least Busy" chart
+                    ticks: { maxRotation: 45, minRotation: 45, font: { size: 10 } } 
+                } 
+            },
+            plugins: { 
                 legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        title: () => '',
-                        label(context) {
-                            const v = context.dataset.data[context.dataIndex];
-                            return [`Route: ${v.route}`, `Market Share: ${v.v}%`];
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: { display: false, min: -0.5, max: 0.5 },
-                y: {
-                    type: 'category',
-                    labels: sortedData.map(d => d.route),
-                    offset: true,
-                    ticks: { font: { size: 11, weight: 'bold' }, color: '#333' },
-                    grid: { display: false }
-                }
-            },
-            layout: { padding: { left: 10, right: 20 } }
+                tooltip: { 
+                    callbacks: { 
+                        label: function(context) { 
+                            return `Market Share: ${context.parsed.y}%`; 
+                        } 
+                    } 
+                } 
+            }
         }
     });
 }
@@ -441,76 +499,222 @@ function createRevenueClassChart(data) {
 
 // 7b. Revenue by Fare Class & Route
 function createRevenueClassRouteChart(data) {
-    if(!data) data = [];
+    if(!data || data.length === 0) return;
+
+    // 1. Get all unique routes and fare classes
+    const uniqueRoutes = [...new Set(data.map(d => d.route))];
+    const uniqueClasses = [...new Set(data.map(d => d.fare_conditions))];
+
+    // 2. Calculate Total Revenue per Route (for sorting)
+    const routeTotals = uniqueRoutes.map(route => {
+        const total = data
+            .filter(d => d.route === route)
+            .reduce((sum, current) => sum + current.total_revenue_by_class, 0);
+        return { route, total };
+    });
+
+    // 3. Sort Routes by Total Revenue (High to Low) and take top 20
+    const sortedRoutes = routeTotals
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 20)
+        .map(item => item.route);
+
+    // 4. Define Colors for Fare Classes
+    const classColors = {
+        'Economy': '#4CAF50',   // Green
+        'Business': '#2196F3',  // Blue
+        'Comfort': '#FFC107'    // Amber
+    };
+
+    // 5. Build Datasets
+    const datasets = uniqueClasses.map(fareClass => {
+        return {
+            label: fareClass,
+            backgroundColor: classColors[fareClass] || '#999',
+            // Map the data to the sorted route order
+            data: sortedRoutes.map(route => {
+                const record = data.find(d => d.route === route && d.fare_conditions === fareClass);
+                return record ? record.total_revenue_by_class : 0;
+            })
+        };
+    });
+
     createOrUpdateChart('revenueClassRouteChart', {
         type: 'bar',
         data: {
-            labels: data.map(d => `${d.route} (${d.fare_conditions})`),
-            datasets: [{
-                label: 'Revenue',
-                data: data.map(d => d.total_revenue_by_class),
-                backgroundColor: '#9C27B0',
-            }]
+            labels: sortedRoutes,
+            datasets: datasets
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            scales: { y: { beginAtZero: true }, x: { ticks: { maxRotation: 90, minRotation: 90, font: { size: 8 } } } },
-            plugins: { legend: { display: false } }
-        }
-    });
-}
-
-// 8. Aircraft Type by Route
-function createAircraftRouteChart(data) {
-    // Prevent Crash on Empty Data
-    if(!data || data.length === 0) {
-        return; // Simply return, chart canvas remains empty but no crash
-    }
-
-    const counts = data.map(d => d.total_flights_on_route);
-    const maxFlights = Math.max(...counts) || 1; // Prevent div by zero
-
-    const uniqueRoutes = [...new Set(data.map(d => d.route))];
-    const uniquePlanes = [...new Set(data.map(d => d.aircraft_code))];
-    
-    const routeCount = uniqueRoutes.length || 1;
-    const planeCount = uniquePlanes.length || 1;
-
-    createOrUpdateChart('aircraftRouteChart', {
-        type: 'matrix', 
-        data: {
-            datasets: [{
-                label: 'Flight Density',
-                data: data.map(d => ({
-                    x: d.route,               
-                    y: d.aircraft_code,       
-                    v: d.total_flights_on_route 
-                })),
-                backgroundColor: function(context) {
-                    const value = context.dataset.data[context.dataIndex].v;
-                    const alpha = (value / maxFlights) + 0.15;
-                    return `rgba(255, 152, 0, ${alpha})`; 
-                },
-                borderColor: 'rgba(200, 200, 200, 0.5)',
-                borderWidth: 1,
-                // Prevents Infinity if width/height is weird
-                width: ({chart}) => ((chart.chartArea || {}).width / routeCount) - 1,
-                height: ({chart}) => ((chart.chartArea || {}).height / planeCount) - 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
             scales: {
-                x: { type: 'category', labels: uniqueRoutes, ticks: { maxRotation: 90, minRotation: 90, font: { size: 9 } }, grid: { display: false } },
-                y: { type: 'category', labels: uniquePlanes, offset: true, ticks: { font: { size: 10 } }, grid: { display: false } }
+                x: {
+                    stacked: true, // Enable Stacking
+                    ticks: { maxRotation: 45, minRotation: 45, font: { size: 10 } },
+                    title: { display: true, text: 'Route' }
+                },
+                y: {
+                    stacked: true, // Enable Stacking
+                    beginAtZero: true,
+                    title: { display: true, text: 'Total Revenue ($)' },
+                    ticks: {
+                        // Format numbers as Millions (e.g., 50M)
+                        callback: function(value) {
+                            return '$' + (value / 1000000).toFixed(0) + 'M';
+                        }
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) {
+                                label += ': ';
+                            }
+                            if (context.parsed.y !== null) {
+                                label += new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(context.parsed.y);
+                            }
+                            return label;
+                        }
+                    }
+                },
+                legend: {
+                    position: 'top'
+                }
             }
         }
     });
 }
 
+
+// --- Global Variable to store aircraft data for filtering ---
+let cachedAircraftData = [];
+
+// 8. Aircraft Type by Route
+function createAircraftRouteChart(data) {
+    if (!data || data.length === 0) return;
+
+    // 1. Cache the data globally so the filter can use it
+    cachedAircraftData = data;
+
+    // 2. Populate the Dropdown (Only if it's empty or needs refresh)
+    const dropdown = document.getElementById('routeSelect');
+    if (dropdown) {
+        // Save current selection to restore it after refresh (if possible)
+        const currentSelection = dropdown.value;
+        
+        // Clear existing options (keep the first "ALL" option)
+        dropdown.innerHTML = '<option value="ALL">Show Top 15 Routes</option>';
+        
+        // Get all unique routes and sort them alphabetically
+        const allRoutes = [...new Set(data.map(d => d.route))].sort();
+        
+        allRoutes.forEach(route => {
+            const option = document.createElement('option');
+            option.value = route;
+            option.textContent = route;
+            dropdown.appendChild(option);
+        });
+
+        // Restore selection if it still exists in new data
+        if (allRoutes.includes(currentSelection)) {
+            dropdown.value = currentSelection;
+        }
+    }
+
+    // 3. Render the chart initially
+    renderFilteredAircraftChart();
+}
+
+// Helper function called when Dropdown changes
+function renderFilteredAircraftChart() {
+    const dropdown = document.getElementById('routeSelect');
+    const selectedRoute = dropdown ? dropdown.value : 'ALL';
+    
+    // Safety check
+    if (!cachedAircraftData || cachedAircraftData.length === 0) return;
+
+    let displayData = [];
+    let routesToShow = [];
+
+    // FILTER LOGIC
+    if (selectedRoute === 'ALL') {
+        // Show Top 15 routes by volume
+        // (Data is already sorted by volume from backend, so take first unique 15)
+        routesToShow = [...new Set(cachedAircraftData.map(d => d.route))].slice(0, 15);
+        displayData = cachedAircraftData.filter(d => routesToShow.includes(d.route));
+    } else {
+        // Show ONLY the selected route
+        routesToShow = [selectedRoute];
+        displayData = cachedAircraftData.filter(d => d.route === selectedRoute);
+    }
+
+    // EXTRACT AIRCRAFT TYPES for the dataset
+    const allAircraft = [...new Set(displayData.map(d => d.aircraft_code))];
+
+    // DEFINE COLORS
+    const colors = {
+        'SU9': 'rgba(255, 99, 132, 0.7)',  // Pink
+        'CN1': 'rgba(255, 206, 86, 0.7)',  // Yellow
+        '321': 'rgba(75, 192, 192, 0.7)',  // Teal
+        '773': 'rgba(54, 162, 235, 0.7)',  // Blue
+        '763': 'rgba(153, 102, 255, 0.7)', // Purple
+        'CR2': 'rgba(255, 159, 64, 0.7)',  // Orange
+        '319': 'rgba(201, 203, 207, 0.7)', // Grey
+        '733': 'rgba(100, 221, 23, 0.7)'   // Green
+    };
+
+    // BUILD DATASETS (Stacked)
+    const datasets = allAircraft.map(ac => {
+        return {
+            label: ac,
+            backgroundColor: colors[ac] || 'rgba(0,0,0,0.5)',
+            data: routesToShow.map(route => {
+                const record = displayData.find(d => d.route === route && d.aircraft_code === ac);
+                return record ? record.total_flights_on_route : 0;
+            })
+        };
+    });
+
+    // RENDER CHART
+    createOrUpdateChart('aircraftRouteChart', {
+        type: 'bar',
+        data: {
+            labels: routesToShow,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    stacked: true,
+                    ticks: { maxRotation: 45, minRotation: 45, font: { size: 10 } },
+                    title: { display: true, text: selectedRoute === 'ALL' ? 'Top Routes' : 'Selected Route' }
+                },
+                y: {
+                    stacked: true,
+                    beginAtZero: true,
+                    title: { display: true, text: 'Flight Frequency' }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    mode: 'index',
+                    intersect: false
+                },
+                legend: {
+                    position: 'top'
+                }
+            }
+        }
+    });
+}
 // 9. Top 3 Most Visited Destinations
 function createDestinationsChart(data) {
     if(!data) data = [];
