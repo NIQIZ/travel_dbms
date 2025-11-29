@@ -202,7 +202,6 @@ async function loadDashboardData() {
 function createCancellationDelayChart(data) {
     if(!data) data = [];
 
-    // Helper to extract JSON model name if needed
     const labels = data.map(d => {
         try {
             // Handle cases where model might still be a JSON string
@@ -322,15 +321,11 @@ function createRoutesChart(data) {
                 key: 'flight_count',
                 groups: ['route'],
                 
-                // Color Logic
                 backgroundColor: function(context) {
                     if (!context.raw) return '#eee';
                     const value = context.raw.v;
-                    // We calculate transparency based on volume
-                    // (You can adjust '350' if your numbers get much bigger)
                     const alpha = (value / 350) + 0.3; 
                     
-                    // CHANGED HERE: We use 54, 162, 235 (which is #36A2EB)
                     return `rgba(54, 162, 235, ${alpha})`;
                 },
                 
@@ -378,7 +373,7 @@ function createOccupancyChart(data) {
     if(!data) data = [];
 
     createOrUpdateChart('occupancyChart', {
-        type: 'line', // <--- Trick: We use 'line' but hide the line itself!
+        type: 'line', 
         data: {
             labels: data.map(d => d.route),
             datasets: [{
@@ -387,20 +382,19 @@ function createOccupancyChart(data) {
                 backgroundColor: 'rgba(153, 102, 255, 0.7)', 
                 
                 // 1. Line Style
-                borderColor: 'rgba(120, 81, 245, 0.5)', // Make the line FADED (0.4 opacity)
-                borderWidth: 2,           // Make the line THIN
-                borderDash: [5, 5],       // <--- Make it DASHED (- - - -)
+                borderColor: 'rgba(120, 81, 245, 0.5)', 
+                borderWidth: 2,           
+                borderDash: [5, 5],       
                 
                 // 2. Dot Style
                 pointRadius: 8,           
                 pointHoverRadius: 10,
                 pointBackgroundColor: 'rgba(153, 102, 255, 0.7)',
-                pointBorderColor: '#ffffff', // Add a tiny white rim to the dot to make it pop
+                pointBorderColor: '#ffffff', 
                 pointBorderWidth: 2,
 
-                // 3. IMPORTANT: Turn the line back on!
-                showLine: true,           // <--- Change 'false' to 'true' (or just delete this line)
-                tension: 0.3              // <--- Optional: Makes the line slightly curvy (smooth)
+                showLine: true,           
+                tension: 0.3              
             }]
         },
         options: {
@@ -408,16 +402,13 @@ function createOccupancyChart(data) {
             maintainAspectRatio: false,
             scales: {
                 y: {
-                    // VISUAL TRICK:
-                    // Since occupancy is usually high (80-100%), starting at 0 makes them look identical.
-                    // We start at 60 or 80 to "Zoom In" and see the differences clearly.
                     min: 50, 
-                    max: 105, // Give a little headroom at the top
+                    max: 105, 
                     beginAtZero: false,
                     title: { display: true, text: 'Occupancy %' },
                     grid: {
-                        color: 'rgba(0,0,0,0.1)', // Light grid lines
-                        borderDash: [5, 5]        // Dotted lines look distinct from the dots
+                        color: 'rgba(0,0,0,0.1)', 
+                        borderDash: [5, 5]        
                     }
                 },
                 x: {
@@ -427,9 +418,9 @@ function createOccupancyChart(data) {
                         font: { size: 10 }
                     },
                     grid: {
-                        display: true,              // <--- Turn lines ON
-                        color: 'rgba(0,0,0,0.05)',  // Make them VERY faint grey
-                        borderDash: [5, 5]          // Make them dashed ( - - - )
+                        display: true,              
+                        color: 'rgba(0,0,0,0.05)',  
+                        borderDash: [5, 5]          
                     }
                 }
             },
@@ -452,8 +443,7 @@ function createOccupancyChart(data) {
 function createMarketShareChart(data) {
     if(!data) data = [];
 
-    // 1. Sort Descending (Highest to Lowest)
-    // This creates a "staircase down" effect which looks great with lollipops
+    
     const sortedData = [...data].sort((a, b) => b.market_share_percent - a.market_share_percent);
     
     createOrUpdateChart('marketShareChart', {
@@ -461,7 +451,7 @@ function createMarketShareChart(data) {
         data: {
             labels: sortedData.map(d => d.route),
             datasets: [
-                // DATASET 1: THE CANDY (The Blue Dot)
+                // DATASET 1: \
                 {
                     type: 'line', 
                     label: 'Market Share (%)',
@@ -473,13 +463,13 @@ function createMarketShareChart(data) {
                     borderWidth: 0,       // Hide the connecting line
                     fill: false
                 },
-                // DATASET 2: THE STICK (The Faded Blue Stick)
+                // DATASET 2: 
                 {
                     type: 'bar',
                     label: 'Stick',
                     data: sortedData.map(d => d.market_share_percent),
-                    backgroundColor: 'rgba(33, 150, 243, 0.5)', // Faded Blue
-                    barPercentage: 0.1,   // <--- The Magic: Makes the bar a thin stick
+                    backgroundColor: 'rgba(33, 150, 243, 0.5)', 
+                    barPercentage: 0.1,   // Makes the bar a thin stick
                     categoryPercentage: 0.8
                 }
             ]
@@ -504,7 +494,7 @@ function createMarketShareChart(data) {
             plugins: { 
                 legend: { display: false },
                 tooltip: { 
-                    // Only show tooltip for the Dot (Dataset 0)
+                    // Only show tooltip for the Dot
                     filter: function(tooltipItem) {
                         return tooltipItem.datasetIndex === 0;
                     },
@@ -523,16 +513,14 @@ function createMarketShareChart(data) {
 function createLeastBusyChart(data) {
     if(!data) data = [];
 
-    // 1. Sort the data from smallest to largest so it looks like a staircase
-    // This makes the lollipop effect look much neater.
     data.sort((a, b) => a.market_share_percent - b.market_share_percent);
 
     createOrUpdateChart('leastBusyChart', {
-        type: 'bar', // The base type is still a bar chart
+        type: 'bar', // base type is a bar chart
         data: {
             labels: data.map(d => d.route),
             datasets: [
-                // DATASET 1: THE CANDY (The Dots)
+                // DATASET 1: 
                 {
                     type: 'line', 
                     label: 'Market Share %',
@@ -540,17 +528,17 @@ function createLeastBusyChart(data) {
                     backgroundColor: '#FF5722', // Bright Orange
                     borderColor: '#FF5722',
                     pointRadius: 6,      // Size of the dot
-                    pointHoverRadius: 8, // Grows when you hover
-                    borderWidth: 0,      // IMPORTANT: Hides the line connecting the dots
+                    pointHoverRadius: 8, 
+                    borderWidth: 0,      
                     fill: false
                 },
-                // DATASET 2: THE STICK (The Skinny Bar)
+                // DATASET 2: 
                 {
                     type: 'bar',
-                    label: 'Stick', // We won't show this in the legend
+                    label: 'Stick', 
                     data: data.map(d => d.market_share_percent),
                     backgroundColor: 'rgba(255, 87, 34, 0.5)', // Faded Orange
-                    barPercentage: 0.1,  // <--- The Magic: Makes the bar very thin!
+                    barPercentage: 0.1,  
                     categoryPercentage: 0.8
                 }
             ]
@@ -561,8 +549,6 @@ function createLeastBusyChart(data) {
             plugins: {
                 legend: { display: false }, // Hide legend to keep it clean
                 tooltip: {
-                    // Only show the tooltip when hovering over the Dot (Dataset 0)
-                    // We hide it for the Stick (Dataset 1) so you don't get double popups
                     filter: function(tooltipItem) {
                         return tooltipItem.datasetIndex === 0;
                     },
@@ -578,8 +564,8 @@ function createLeastBusyChart(data) {
                     beginAtZero: true,
                     title: { display: true, text: 'Market Share (%)' },
                     grid: {
-                        color: 'rgba(0,0,0,0.05)', // Very faint grid lines
-                        borderDash: [5, 5]         // Dotted lines look cool with lollipops
+                        color: 'rgba(0,0,0,0.05)', 
+                        borderDash: [5, 5]        
                     }
                 },
                 x: {
@@ -817,7 +803,6 @@ function renderFilteredAircraftChart() {
     // FILTER LOGIC
     if (selectedRoute === 'ALL') {
         // Show Top 15 routes by volume
-        // (Data is already sorted by volume from backend, so take first unique 15)
         routesToShow = [...new Set(cachedAircraftData.map(d => d.route))].slice(0, 15);
         displayData = cachedAircraftData.filter(d => routesToShow.includes(d.route));
     } else {
@@ -929,7 +914,7 @@ function createUtilizationChart(data) {
     createOrUpdateChart('utilizationChart', {
         type: 'polarArea',
         data: {
-            // I added the mileage to the label so you can see it in the Legend!
+            // Added the mileage to the label
             labels: top5Data.map(d => `${d.aircraft_code} (${d.aircraft_model}) : ${(d.total_mileage/1000).toFixed(0)}k mi`),
             datasets: [{
                 label: 'Total Mileage',
@@ -958,7 +943,6 @@ function createUtilizationChart(data) {
                 tooltip: {
                     callbacks: {
                         label: function(context) {
-                            // Extract just the name for the tooltip so it isn't repeated
                             return ' ' + context.formattedValue + ' miles';
                         }
                     }
