@@ -485,20 +485,18 @@ def get_bookings():
         search = request.args.get('search', '', type=str)
         column = request.args.get('column', 'ticket_no', type=str)
 
+        # UPDATED: Only columns that exist in your relational.py schema
         col_map = {
             'ticket_no': 't.ticket_no',
             'book_ref': 't.book_ref',
-            'passenger_name': 't.passenger_name',
-            'passenger_id': 't.passenger_id',
-            'contact_data': 't.contact_data'
+            'passenger_id': 't.passenger_id'
         }
-        # Default to ticket_no if invalid column
         safe_col = col_map.get(column, 't.ticket_no')
 
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        base_query = "SELECT t.ticket_no, t.book_ref, t.passenger_id, b.book_date, t.passenger_name, t.contact_data FROM tickets t JOIN bookings b ON t.book_ref = b.book_ref"
+        base_query = "SELECT t.ticket_no, t.book_ref, t.passenger_id, b.book_date FROM tickets t JOIN bookings b ON t.book_ref = b.book_ref"
         
         if search:
             cursor.execute(f"SELECT COUNT(*) FROM tickets t JOIN bookings b ON t.book_ref = b.book_ref WHERE {safe_col} LIKE ?", (f'%{search}%',))
@@ -525,7 +523,8 @@ def get_booking(ticket_no):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM tickets WHERE ticket_no = ?", (ticket_no,))
+        # UPDATED: Selects strictly from schema
+        cursor.execute("SELECT ticket_no, book_ref, passenger_id FROM tickets WHERE ticket_no = ?", (ticket_no,))
         booking = cursor.fetchone()
         conn.close()
         if booking: return jsonify(dict(booking))
@@ -538,20 +537,24 @@ def create_booking():
     conn = None
     try:
         data = request.get_json()
-        required_fields = ['ticket_no', 'book_ref', 'passenger_id', 'passenger_name', 'contact_data']
+        required_fields = ['ticket_no', 'book_ref', 'passenger_id']
         for field in required_fields:
             if field not in data: return jsonify({'error': f'Missing required field: {field}'}), 400
+        
         conn = get_db_connection()
         cursor = conn.cursor()
-        contact_data = data['contact_data']
-        if isinstance(contact_data, dict): contact_data = json.dumps(contact_data)
         cursor.execute("BEGIN TRANSACTION")
-        cursor.execute("INSERT INTO tickets (ticket_no, book_ref, passenger_id, passenger_name, contact_data) VALUES (?, ?, ?, ?, ?)", (data['ticket_no'], data['book_ref'], data['passenger_id'], data['passenger_name'], contact_data))
+        
+        # Ensure Booking Reference exists first (FK Constraint)
+        cursor.execute("SELECT 1 FROM bookings WHERE book_ref = ?", (data['book_ref'],))
+        if not cursor.fetchone():
+             # If booking ref doesn't exist, create it (simple logic for this demo)
+             cursor.execute("INSERT INTO bookings (book_ref, book_date, total_amount) VALUES (?, datetime('now'), 0)", (data['book_ref'],))
+
+        cursor.execute("INSERT INTO tickets (ticket_no, book_ref, passenger_id) VALUES (?, ?, ?)", 
+                       (data['ticket_no'], data['book_ref'], data['passenger_id']))
         conn.commit()
         return jsonify({'message': 'Booking created successfully'}), 201
-    except sqlite3.IntegrityError as e:
-        if conn: conn.rollback()
-        return jsonify({'error': f'Database integrity error: {str(e)}'}), 400
     except Exception as e:
         if conn: conn.rollback()
         return jsonify({'error': str(e)}), 500
@@ -567,16 +570,18 @@ def update_booking(ticket_no):
         cursor = conn.cursor()
         update_fields = []
         values = []
-        for field in ['passenger_name', 'contact_data']:
-            if field in data:
-                val = data[field]
-                if field == 'contact_data' and isinstance(val, dict): val = json.dumps(val)
-                update_fields.append(f"{field} = ?")
-                values.append(val)
-        if not update_fields: return jsonify({'error': 'No fields'}), 400
+        
+        # UPDATED: Only allow updating passenger_id (Ticket No and Book Ref usually static)
+        if 'passenger_id' in data:
+            update_fields.append("passenger_id = ?")
+            values.append(data['passenger_id'])
+            
+        if not update_fields: return jsonify({'error': 'No valid fields provided (only passenger_id can be updated)'}), 400
+        
         values.append(ticket_no)
         cursor.execute("BEGIN TRANSACTION")
         cursor.execute(f"UPDATE tickets SET {', '.join(update_fields)} WHERE ticket_no = ?", values)
+        
         if cursor.rowcount == 0:
             conn.rollback()
             return jsonify({'error': 'Booking not found'}), 404
@@ -595,6 +600,7 @@ def delete_booking(ticket_no):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("BEGIN TRANSACTION")
+        # Cascade delete logic
         cursor.execute("DELETE FROM ticket_flights WHERE ticket_no = ?", (ticket_no,))
         cursor.execute("DELETE FROM boarding_passes WHERE ticket_no = ?", (ticket_no,))
         cursor.execute("DELETE FROM tickets WHERE ticket_no = ?", (ticket_no,))
@@ -1498,7 +1504,6 @@ def delete_nosql_flight(id):
 
 @app.route('/api/nosql/bookings', methods=['GET'])
 def get_nosql_bookings_formatted():
-    # ... (Keep existing code for this function, no changes needed for the list view) ...
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
     search = request.args.get('search', '')
@@ -1521,49 +1526,42 @@ def get_nosql_bookings_formatted():
         output.append({
             'ticket_no': first_ticket.get('ticket_no', 'N/A'),
             'book_ref': b.get('_id'),
-            'passenger_name': first_ticket.get('passenger_name', 'Unknown'),
-            'passenger_id': first_ticket.get('passenger_id', 'N/A'),
-            'contact_data': first_ticket.get('contact_data', '{}'),
-            # No version needed here for the list view
+            'passenger_id': first_ticket.get('passenger_id', 'N/A')
+            # UPDATED: Removed name and contact to match SQL
         })
     return jsonify({'bookings': output, 'total': total, 'page': page, 'total_pages': (total + per_page - 1) // per_page})
 
-# NEW ENDPOINT: Needed for the Edit Modal to get the version
 @app.route('/api/nosql/bookings/<ticket_no>', methods=['GET'])
 def get_nosql_booking_single(ticket_no):
     booking = mongo.db.bookings.find_one({"tickets.ticket_no": ticket_no})
     if not booking: return jsonify({'error': 'Booking not found'}), 404
     
-    # Extract ticket data
     ticket_data = next((t for t in booking.get('tickets', []) if t['ticket_no'] == ticket_no), {})
     
     return jsonify({
         'ticket_no': ticket_no,
         'book_ref': booking['_id'],
-        'passenger_name': ticket_data.get('passenger_name'),
         'passenger_id': ticket_data.get('passenger_id'),
-        'contact_data': ticket_data.get('contact_data'),
-        'version': booking.get('version', 1) # Return parent doc version
+        'version': booking.get('version', 1)
+        # UPDATED: Removed name and contact
     })
 
 @app.route('/api/nosql/bookings', methods=['POST'])
 def create_nosql_booking():
     data = request.get_json()
+    # UPDATED: Only strictly required fields
     new_ticket = {
         'ticket_no': data['ticket_no'],
         'passenger_id': data['passenger_id'],
-        'passenger_name': data['passenger_name'],
-        'contact_data': data['contact_data'],
         'flight_legs': [] 
     }
     existing = mongo.db.bookings.find_one({'_id': data['book_ref']})
     if existing:
-        # Optimistic locking optional here, but good practice to check version
         mongo.db.bookings.update_one(
             {'_id': data['book_ref']}, 
             {
                 '$push': {'tickets': new_ticket},
-                '$inc': {'version': 1} # Increment version on change
+                '$inc': {'version': 1}
             }
         )
         return jsonify({'message': 'Added ticket to existing booking'}), 201
@@ -1573,7 +1571,7 @@ def create_nosql_booking():
             'book_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'total_amount': 0,
             'tickets': [new_ticket],
-            'version': 1 # Initialize version
+            'version': 1
         }
         mongo.db.bookings.insert_one(new_booking)
         return jsonify({'message': 'Created new booking with ticket'}), 201
@@ -1585,13 +1583,10 @@ def update_nosql_booking(ticket_no):
     if client_version is None: return jsonify({'error': 'Missing version'}), 400
 
     update_fields = {}
-    if 'passenger_name' in data: update_fields['tickets.$.passenger_name'] = data['passenger_name']
-    if 'contact_data' in data: update_fields['tickets.$.contact_data'] = data['contact_data']
+    if 'passenger_id' in data: update_fields['tickets.$.passenger_id'] = data['passenger_id']
     
-    # Include version increment
     update_fields['version'] = int(client_version) + 1
 
-    # Match Ticket AND Version
     result = mongo.db.bookings.update_one(
         {'tickets.ticket_no': ticket_no, 'version': int(client_version)}, 
         {'$set': update_fields}

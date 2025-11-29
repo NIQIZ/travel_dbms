@@ -444,34 +444,25 @@
                 <select id="bookings-search-col" class="form-select" style="max-width: 180px; border: 2px solid #e0e0e0;">
                     <option value="ticket_no">Ticket No</option>
                     <option value="book_ref">Book Ref</option>
-                    <option value="passenger_name">Passenger Name</option>
                     <option value="passenger_id">Passenger ID</option>
-                    <option value="contact_data">Contact</option>
                 </select>
                 <input type="text" id="bookings-search" placeholder="Search bookings...">
                 <button class="btn btn-primary" onclick="searchBookings()">Search</button>
             </div>
-            <button class="btn btn-success" onclick="openCreateModal('booking')">
-                ➕ Add New Booking
-            </button>
-        </div>
-        
-        <div id="bookings-message"></div>
-        
+            </div>
+
         <div class="data-table">
             <table>
                 <thead>
                     <tr>
                         <th>Ticket No</th>
                         <th>Book Ref</th>
-                        <th>Passenger Name</th>
                         <th>Passenger ID</th>
-                        <th>Contact</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="bookings-tbody">
-                    <tr><td colspan="6" class="loading">Loading...</td></tr>
+                    <tr><td colspan="4" class="loading">Loading...</td></tr>
                 </tbody>
             </table>
         </div>

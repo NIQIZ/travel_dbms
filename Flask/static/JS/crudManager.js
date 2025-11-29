@@ -126,19 +126,15 @@ function renderFlights(flights) {
 // Render bookings table
 function renderBookings(bookings) {
     const tbody = document.getElementById('bookings-tbody');
-    
     if (!bookings || bookings.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="loading">No bookings found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" class="loading">No bookings found</td></tr>';
         return;
     }
-    
     tbody.innerHTML = bookings.map(booking => `
         <tr>
             <td>${booking.ticket_no}</td>
             <td>${booking.book_ref}</td>
-            <td>${booking.passenger_name}</td>
             <td>${booking.passenger_id}</td>
-            <td>${formatContact(booking.contact_data)}</td>
             <td>
                 <div class="action-buttons">
                     <button class="btn btn-warning btn-sm" onclick="editBooking('${booking.ticket_no}')">✏️ Edit</button>
@@ -558,18 +554,10 @@ function getFlightForm(flight) {
 }
 
 function getBookingForm(booking) {
-    let email = '', phone = '';
-    if (booking?.contact_data) {
-        try {
-            const contact = typeof booking.contact_data === 'string' ? JSON.parse(booking.contact_data) : booking.contact_data;
-            email = contact.email || '';
-            phone = contact.phone || '';
-        } catch (e) {}
-    }
-    
     return `
         <form id="record-form" onsubmit="event.preventDefault(); submitForm('booking');">
-            ${getVersionInput(booking)} ${currentMode === 'create' ? `
+            ${getVersionInput(booking)}
+            ${currentMode === 'create' ? `
             <div class="form-group">
                 <label>Ticket Number *</label>
                 <input type="text" name="ticket_no" value="${booking?.ticket_no || ''}" required>
@@ -578,22 +566,10 @@ function getBookingForm(booking) {
                 <label>Book Reference *</label>
                 <input type="text" name="book_ref" value="${booking?.book_ref || ''}" required>
             </div>
+            ` : ''}
             <div class="form-group">
                 <label>Passenger ID *</label>
                 <input type="text" name="passenger_id" value="${booking?.passenger_id || ''}" required>
-            </div>
-            ` : ''}
-            <div class="form-group">
-                <label>Passenger Name *</label>
-                <input type="text" name="passenger_name" value="${booking?.passenger_name || ''}" required>
-            </div>
-            <div class="form-group">
-                <label>Contact Email</label>
-                <input type="email" name="contact_email" value="${email}">
-            </div>
-            <div class="form-group">
-                <label>Contact Phone</label>
-                <input type="text" name="contact_phone" value="${phone}">
             </div>
             <div class="form-actions">
                 <button type="button" class="btn" onclick="closeModal()">Cancel</button>

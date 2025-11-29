@@ -122,7 +122,6 @@ if flights_list:
 #############################################################################
 print("3. Migrating Bookings (Embedding Tickets, Referencing Flights)...")
 
-# FIXED QUERY: Removed passenger_name and contact_data
 cursor.execute("""
     SELECT 
         b.book_ref, b.book_date, b.total_amount,
@@ -157,9 +156,7 @@ for row in cursor.fetchall():
     if ticket_no not in bookings_map[book_ref]['tickets']:
         bookings_map[book_ref]['tickets'][ticket_no] = {
             'ticket_no': ticket_no,
-            'passenger_id': row['passenger_id'],
-            # FIXED: Added default placeholders since columns are missing in SQL
-            'passenger_name': "Unknown Passenger", 
+            'passenger_id': row['passenger_id'], 
             'contact_data': "{}",
             'flight_legs': []
         }
