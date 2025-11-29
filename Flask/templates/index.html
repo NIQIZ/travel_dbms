@@ -6,6 +6,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@1.1.1/dist/chartjs-chart-matrix.min.js"></script>
 <script src="https://unpkg.com/@sgratzl/chartjs-chart-boxplot@3.6.0/build/index.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.3.0/dist/chartjs-chart-treemap.min.js"></script>
 
 {% endblock %}
 
@@ -114,15 +115,23 @@
             </div>
             <div class="col-md-6">
                 <div class="chart-card">
-                    <h4>Busiest Routes by Market Share % </h4>
+                    <h4>Revenue by Fare Class</h4>
                     <div class="chart-container">
-                        <canvas id="marketShareChart"></canvas>
+                        <canvas id="revenueClassChart"></canvas>
                     </div>
                 </div>
             </div>
         </div>
         
         <div class="row">
+            <div class="col-md-6">
+                <div class="chart-card">
+                    <h4>Top 10 Busiest Routes by Market Share % </h4>
+                    <div class="chart-container">
+                        <canvas id="marketShareChart"></canvas>
+                    </div>
+                </div>
+            </div>
             <div class="col-md-6">
                 <div class="chart-card">
                     <h4>10 Least Busy Routes by Market Share %</h4>
@@ -131,6 +140,9 @@
                     </div>
                 </div>
             </div>
+        </div>
+        
+        <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">
                     <h4>Top 3 Most Profitable Routes</h4>
@@ -139,22 +151,11 @@
                     </div>
                 </div>
             </div>
-        </div>
-        
-        <div class="row">
             <div class="col-md-6">
                 <div class="chart-card">
                     <h4>Top 3 Least Profitable Routes</h4>
                     <div class="chart-container">
                         <canvas id="leastProfitableChart"></canvas>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="chart-card">
-                    <h4>Revenue by Fare Class</h4>
-                    <div class="chart-container">
-                        <canvas id="revenueClassChart"></canvas>
                     </div>
                 </div>
             </div>

@@ -294,8 +294,8 @@ function createPunctualChart(data) {
             datasets: [{
                 label: 'Average Delay (mins)',
                 data: data.map(d => d.avg_delay_mins),
-                backgroundColor: 'rgba(255, 99, 132, 0.8)',
-                borderColor: 'rgba(255, 99, 132, 1)',
+                backgroundColor: '#FFCE56',
+                borderColor: '#FFCE56',
                 borderWidth: 1
             }]
         },
@@ -312,23 +312,62 @@ function createPunctualChart(data) {
 // 5. Top 10 Routes by Flight Volume
 function createRoutesChart(data) {
     if(!data) data = [];
-    createOrUpdateChart('routesChart', {
-        type: 'bar',
+
+    createOrUpdateChart('routesChart', { 
+        type: 'treemap',
         data: {
-            labels: data.map(d => d.route),
             datasets: [{
-                label: 'Number of Flights',
-                data: data.map(d => d.flight_count),
-                backgroundColor: '#667eea',
+                label: 'Flight Volume',
+                tree: data, 
+                key: 'flight_count',
+                groups: ['route'],
+                
+                // Color Logic
+                backgroundColor: function(context) {
+                    if (!context.raw) return '#eee';
+                    const value = context.raw.v;
+                    // We calculate transparency based on volume
+                    // (You can adjust '350' if your numbers get much bigger)
+                    const alpha = (value / 350) + 0.3; 
+                    
+                    // CHANGED HERE: We use 54, 162, 235 (which is #36A2EB)
+                    return `rgba(54, 162, 235, ${alpha})`;
+                },
+                
+                borderColor: 'white',
+                borderWidth: 2,
+                borderRadius: 6,
+                spacing: 1,
+                
+                labels: {
+                    display: true,
+                    color: 'white',
+                    align: 'left',
+                    position: 'top',
+                    font: { size: 14, weight: 'bold' },
+                    formatter: function(context) {
+                        return context.raw.g; 
+                    }
+                }
             }]
         },
         options: {
-            responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 10 } } },
-                y: { beginAtZero: true }
+            plugins: {
+                legend: { display: false },
+                title: { 
+                    display: true, 
+                    text: 'Top 10 Routes by Flight Volume',
+                    font: { size: 16 }
+                },
+                tooltip: {
+                    callbacks: {
+                        title: () => '', 
+                        label: function(item) {
+                            return ` ${item.raw.g}: ${item.raw.v} flights`;
+                        }
+                    }
+                }
             }
         }
     });
@@ -337,46 +376,113 @@ function createRoutesChart(data) {
 // 2. Top 10 Routes by Average Occupancy Rate
 function createOccupancyChart(data) {
     if(!data) data = [];
+
     createOrUpdateChart('occupancyChart', {
-        type: 'bar',
+        type: 'line', // <--- Trick: We use 'line' but hide the line itself!
         data: {
             labels: data.map(d => d.route),
             datasets: [{
                 label: 'Occupancy Rate (%)',
                 data: data.map(d => d.avg_occupancy_percent),
-                backgroundColor: '#4CAF50',
+                backgroundColor: 'rgba(153, 102, 255, 0.7)', 
+                
+                // 1. Line Style
+                borderColor: 'rgba(120, 81, 245, 0.5)', // Make the line FADED (0.4 opacity)
+                borderWidth: 2,           // Make the line THIN
+                borderDash: [5, 5],       // <--- Make it DASHED (- - - -)
+                
+                // 2. Dot Style
+                pointRadius: 8,           
+                pointHoverRadius: 10,
+                pointBackgroundColor: 'rgba(153, 102, 255, 0.7)',
+                pointBorderColor: '#ffffff', // Add a tiny white rim to the dot to make it pop
+                pointBorderWidth: 2,
+
+                // 3. IMPORTANT: Turn the line back on!
+                showLine: true,           // <--- Change 'false' to 'true' (or just delete this line)
+                tension: 0.3              // <--- Optional: Makes the line slightly curvy (smooth)
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             scales: {
-                y: { beginAtZero: true, max: 100 },
-                x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 10 } } }
+                y: {
+                    // VISUAL TRICK:
+                    // Since occupancy is usually high (80-100%), starting at 0 makes them look identical.
+                    // We start at 60 or 80 to "Zoom In" and see the differences clearly.
+                    min: 50, 
+                    max: 105, // Give a little headroom at the top
+                    beginAtZero: false,
+                    title: { display: true, text: 'Occupancy %' },
+                    grid: {
+                        color: 'rgba(0,0,0,0.1)', // Light grid lines
+                        borderDash: [5, 5]        // Dotted lines look distinct from the dots
+                    }
+                },
+                x: {
+                    ticks: {
+                        maxRotation: 45,
+                        minRotation: 45,
+                        font: { size: 10 }
+                    },
+                    grid: {
+                        display: true,              // <--- Turn lines ON
+                        color: 'rgba(0,0,0,0.05)',  // Make them VERY faint grey
+                        borderDash: [5, 5]          // Make them dashed ( - - - )
+                    }
+                }
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: 'rgba(0,0,0,0.8)',
+                    callbacks: {
+                        label: function(context) {
+                            return ` ${context.parsed.y}% Occupancy`;
+                        }
+                    }
+                }
             }
         }
     });
 }
 
-// 3. Busiest Routes by Market Share % - TRUE GRID HEATMAP
+// 3. Busiest Routes by Market Share %
 function createMarketShareChart(data) {
     if(!data) data = [];
 
-    // Sort Descending (Highest to Lowest) because this is "Busiest Routes"
+    // 1. Sort Descending (Highest to Lowest)
+    // This creates a "staircase down" effect which looks great with lollipops
     const sortedData = [...data].sort((a, b) => b.market_share_percent - a.market_share_percent);
     
     createOrUpdateChart('marketShareChart', {
-        type: 'bar',
+        type: 'bar', // Base type
         data: {
             labels: sortedData.map(d => d.route),
-            datasets: [{
-                label: 'Market Share (%)',
-                data: sortedData.map(d => d.market_share_percent),
-                // Using Blue to differentiate "Busiest" from "Least Busy" (Orange)
-                backgroundColor: '#2196F3',
-                borderColor: '#1976D2',
-                borderWidth: 1
-            }]
+            datasets: [
+                // DATASET 1: THE CANDY (The Blue Dot)
+                {
+                    type: 'line', 
+                    label: 'Market Share (%)',
+                    data: sortedData.map(d => d.market_share_percent),
+                    backgroundColor: '#2196F3', // Solid Blue
+                    borderColor: '#2196F3',
+                    pointRadius: 6,       // Visible dot
+                    pointHoverRadius: 8,
+                    borderWidth: 0,       // Hide the connecting line
+                    fill: false
+                },
+                // DATASET 2: THE STICK (The Faded Blue Stick)
+                {
+                    type: 'bar',
+                    label: 'Stick',
+                    data: sortedData.map(d => d.market_share_percent),
+                    backgroundColor: 'rgba(33, 150, 243, 0.5)', // Faded Blue
+                    barPercentage: 0.1,   // <--- The Magic: Makes the bar a thin stick
+                    categoryPercentage: 0.8
+                }
+            ]
         },
         options: {
             responsive: true,
@@ -384,19 +490,27 @@ function createMarketShareChart(data) {
             scales: { 
                 y: { 
                     beginAtZero: true,
-                    title: { display: true, text: 'Market Share (%)' }
+                    title: { display: true, text: 'Market Share (%)' },
+                    grid: {
+                        color: 'rgba(0,0,0,0.05)', 
+                        borderDash: [5, 5] // Dashed lines look modern
+                    }
                 }, 
                 x: { 
-                    // Angled labels just like the "Least Busy" chart
-                    ticks: { maxRotation: 45, minRotation: 45, font: { size: 10 } } 
+                    ticks: { maxRotation: 45, minRotation: 45, font: { size: 10 } },
+                    grid: { display: false } // Hide vertical lines
                 } 
             },
             plugins: { 
                 legend: { display: false },
                 tooltip: { 
+                    // Only show tooltip for the Dot (Dataset 0)
+                    filter: function(tooltipItem) {
+                        return tooltipItem.datasetIndex === 0;
+                    },
                     callbacks: { 
                         label: function(context) { 
-                            return `Market Share: ${context.parsed.y}%`; 
+                            return ` Market Share: ${context.parsed.y}%`; 
                         } 
                     } 
                 } 
@@ -495,7 +609,7 @@ function createProfitableRoutesChart(topRoutes, leastRoutes) {
             datasets: [{
                 label: 'Revenue ($)',
                 data: topRoutes.map(d => d.total_revenue),
-                backgroundColor: '#4CAF50',
+                backgroundColor: '#66BB6A',
             }]
         },
         options: {
@@ -504,7 +618,7 @@ function createProfitableRoutesChart(topRoutes, leastRoutes) {
             indexAxis: 'y',
             scales: { x: { beginAtZero: true, ticks: { callback: function(value) { return '$' + (value / 1000000).toFixed(1) + 'M'; } } } },
             plugins: {
-                title: { display: true, text: 'Most Profitable Routes', color: '#4CAF50' },
+                title: { display: true, text: 'Most Profitable Routes', color: '#66BB6A' },
                 legend: { display: false }
             }
         }
@@ -517,7 +631,7 @@ function createProfitableRoutesChart(topRoutes, leastRoutes) {
             datasets: [{
                 label: 'Revenue ($)',
                 data: leastRoutes.map(d => d.total_revenue),
-                backgroundColor: '#f44336',
+                backgroundColor: '#EF5350',
             }]
         },
         options: {
@@ -526,7 +640,7 @@ function createProfitableRoutesChart(topRoutes, leastRoutes) {
             indexAxis: 'y',
             scales: { x: { beginAtZero: true, ticks: { callback: function(value) { return '$' + (value / 1000).toFixed(0) + 'K'; } } } },
             plugins: {
-                title: { display: true, text: 'Least Profitable Routes', color: '#f44336' },
+                title: { display: true, text: 'Least Profitable Routes', color: '#EF5350' },
                 legend: { display: false }
             }
         }
@@ -542,7 +656,9 @@ function createRevenueClassChart(data) {
             labels: data.map(d => d.fare_conditions),
             datasets: [{
                 data: data.map(d => d.total_revenue_by_class),
-                backgroundColor: ['#2196F3', '#4CAF50', '#FFC107'],
+                backgroundColor: ['rgba(255, 99, 132, 0.7)',
+                     'rgba(54, 162, 235, 0.7)',
+                     'rgba(255, 206, 86, 0.7)'],
             }]
         },
         options: {
@@ -559,7 +675,7 @@ function createRevenueClassRouteChart(data) {
 
     // 1. Get all unique routes and fare classes
     const uniqueRoutes = [...new Set(data.map(d => d.route))];
-    const uniqueClasses = [...new Set(data.map(d => d.fare_conditions))];
+    const uniqueClasses = ['Economy', 'Business', 'Comfort'];
 
     // 2. Calculate Total Revenue per Route (for sorting)
     const routeTotals = uniqueRoutes.map(route => {
@@ -577,9 +693,9 @@ function createRevenueClassRouteChart(data) {
 
     // 4. Define Colors for Fare Classes
     const classColors = {
-        'Economy': '#4CAF50',   // Green
-        'Business': '#2196F3',  // Blue
-        'Comfort': '#FFC107'    // Amber
+        'Economy': 'rgba(153, 102, 255, 0.7)',   
+        'Business': 'rgba(75, 192, 192, 0.7)',  
+        'Comfort': '#FFC107'    
     };
 
     // 5. Build Datasets
