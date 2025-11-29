@@ -341,47 +341,31 @@ def get_flights():
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
-        search = request.args.get('search', '', type=str)
-        column = request.args.get('column', 'flight_no', type=str)
+        search = request.args.get('search', '')
+        column = request.args.get('column', 'flight_no')
         
-        allowed_cols = ['flight_id', 'flight_no', 'route', 'scheduled_departure', 'status', 'aircraft_code']
+        # REMOVED 'route', ADDED missing schema columns
+        allowed_cols = [
+            'flight_id', 'flight_no', 'scheduled_departure', 'scheduled_arrival', 
+            'departure_airport', 'arrival_airport', 'status', 'aircraft_code', 
+            'actual_departure', 'actual_arrival'
+        ]
         safe_col = validate_column(column, allowed_cols)
 
         conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Base Queries
-        count_sql = "SELECT COUNT(*) FROM flights"
-        data_sql = "SELECT * FROM flights"
-        params = []
-
-        if search:
-            if safe_col == 'route':
-                # Special logic for Route: Search Departure OR Arrival
-                where_clause = "WHERE departure_airport LIKE ? OR arrival_airport LIKE ?"
-                params = [f'%{search}%', f'%{search}%']
-            else:
-                where_clause = f"WHERE {safe_col} LIKE ?"
-                params = [f'%{search}%']
-            
-            count_sql += " " + where_clause
-            data_sql += " " + where_clause
-        
-        # Execute Count
-        cursor.execute(count_sql, params)
-        total = cursor.fetchone()[0]
-
-        # Execute Data Query
         offset = (page - 1) * per_page
-        data_sql += " ORDER BY scheduled_departure DESC LIMIT ? OFFSET ?"
-        params.extend([per_page, offset])
         
-        cursor.execute(data_sql, params)
-        flights = [dict(row) for row in cursor.fetchall()]
+        # Standard query structure
+        if search:
+            total = conn.execute(f"SELECT COUNT(*) FROM flights WHERE {safe_col} LIKE ?", (f'%{search}%',)).fetchone()[0]
+            rows = conn.execute(f"SELECT * FROM flights WHERE {safe_col} LIKE ? ORDER BY scheduled_departure DESC LIMIT ? OFFSET ?", (f'%{search}%', per_page, offset)).fetchall()
+        else:
+            total = conn.execute("SELECT COUNT(*) FROM flights").fetchone()[0]
+            rows = conn.execute("SELECT * FROM flights ORDER BY scheduled_departure DESC LIMIT ? OFFSET ?", (per_page, offset)).fetchall()
+            
         conn.close()
-        return jsonify({'flights': flights, 'total': total, 'page': page, 'per_page': per_page, 'total_pages': (total + per_page - 1) // per_page})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'flights': [dict(r) for r in rows], 'total': total, 'page': page, 'total_pages': (total + per_page - 1) // per_page})
+    except Exception as e: return jsonify({'error': str(e)}), 500
     
 @app.route('/api/flights/<int:flight_id>', methods=['GET'])
 def get_flight(flight_id):
@@ -483,54 +467,66 @@ def get_bookings():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         search = request.args.get('search', '', type=str)
-        column = request.args.get('column', 'ticket_no', type=str)
+        column = request.args.get('column', 'book_ref') # Default sort by Book Ref
 
-        # UPDATED: Only columns that exist in your relational.py schema
+        # UPDATED: Mapping strictly to bookings table columns
+        # We removed ticket_no and passenger_id because they don't exist in the bookings table
         col_map = {
-            'ticket_no': 't.ticket_no',
-            'book_ref': 't.book_ref',
-            'passenger_id': 't.passenger_id'
+            'book_ref': 'book_ref',
+            'book_date': 'book_date',
+            'total_amount': 'total_amount'
         }
-        safe_col = col_map.get(column, 't.ticket_no')
+        safe_col = col_map.get(column, 'book_ref')
 
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        base_query = "SELECT t.ticket_no, t.book_ref, t.passenger_id, b.book_date FROM tickets t JOIN bookings b ON t.book_ref = b.book_ref"
-        
+        # Base Queries (Targeting the correct table)
+        count_sql = "SELECT COUNT(*) FROM bookings"
+        data_sql = "SELECT * FROM bookings"
+        params = []
+
         if search:
-            cursor.execute(f"SELECT COUNT(*) FROM tickets t JOIN bookings b ON t.book_ref = b.book_ref WHERE {safe_col} LIKE ?", (f'%{search}%',))
-        else:
-            cursor.execute("SELECT COUNT(*) FROM tickets")
+            # Add WHERE clause if searching
+            where_clause = f"WHERE {safe_col} LIKE ?"
+            params = [f'%{search}%']
+            count_sql += " " + where_clause
+            data_sql += " " + where_clause
+        
+        # Execute Count
+        cursor.execute(count_sql, params)
         total = cursor.fetchone()[0]
         
+        # Execute Data Query with Pagination
+        # Default sort by book_date DESC to show newest bookings first
         offset = (page - 1) * per_page
-        if search:
-            sql = f"{base_query} WHERE {safe_col} LIKE ? ORDER BY b.book_date DESC LIMIT ? OFFSET ?"
-            cursor.execute(sql, (f'%{search}%', per_page, offset))
-        else:
-            sql = f"{base_query} ORDER BY b.book_date DESC LIMIT ? OFFSET ?"
-            cursor.execute(sql, (per_page, offset))
+        data_sql += " ORDER BY book_date DESC LIMIT ? OFFSET ?"
+        params.extend([per_page, offset])
             
+        cursor.execute(data_sql, params)
         bookings = [dict(row) for row in cursor.fetchall()]
         conn.close()
-        return jsonify({'bookings': bookings, 'total': total, 'page': page, 'per_page': per_page, 'total_pages': (total + per_page - 1) // per_page})
+        
+        return jsonify({
+            'bookings': bookings, 
+            'total': total, 
+            'page': page, 
+            'per_page': per_page, 
+            'total_pages': (total + per_page - 1) // per_page
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/bookings/<ticket_no>', methods=['GET'])
-def get_booking(ticket_no):
+@app.route('/api/bookings/<book_ref>', methods=['GET'])
+def get_booking(book_ref):
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        # UPDATED: Selects strictly from schema
-        cursor.execute("SELECT ticket_no, book_ref, passenger_id FROM tickets WHERE ticket_no = ?", (ticket_no,))
-        booking = cursor.fetchone()
+        # FIX: Query 'bookings' table, not 'tickets'
+        row = conn.execute("SELECT * FROM bookings WHERE book_ref = ?", (book_ref,)).fetchone()
         conn.close()
-        if booking: return jsonify(dict(booking))
+        if row: return jsonify(dict(row))
         return jsonify({'error': 'Booking not found'}), 404
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @app.route('/api/bookings', methods=['POST'])
 def create_booking():
@@ -561,30 +557,36 @@ def create_booking():
     finally:
         if conn: conn.close()
 
-@app.route('/api/bookings/<ticket_no>', methods=['PUT'])
-def update_booking(ticket_no):
+@app.route('/api/bookings/<book_ref>', methods=['PUT'])
+def update_booking(book_ref):
     conn = None
     try:
         data = request.get_json()
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        # FIX: Allow updating Booking Date and Amount (Book Ref is PK/Locked)
         update_fields = []
         values = []
         
-        # UPDATED: Only allow updating passenger_id (Ticket No and Book Ref usually static)
-        if 'passenger_id' in data:
-            update_fields.append("passenger_id = ?")
-            values.append(data['passenger_id'])
+        if 'book_date' in data:
+            update_fields.append("book_date = ?")
+            values.append(data['book_date'])
+        if 'total_amount' in data:
+            update_fields.append("total_amount = ?")
+            values.append(data['total_amount'])
             
-        if not update_fields: return jsonify({'error': 'No valid fields provided (only passenger_id can be updated)'}), 400
+        if not update_fields: return jsonify({'error': 'No fields to update'}), 400
         
-        values.append(ticket_no)
+        values.append(book_ref)
+        
         cursor.execute("BEGIN TRANSACTION")
-        cursor.execute(f"UPDATE tickets SET {', '.join(update_fields)} WHERE ticket_no = ?", values)
+        cursor.execute(f"UPDATE bookings SET {', '.join(update_fields)} WHERE book_ref = ?", values)
         
         if cursor.rowcount == 0:
             conn.rollback()
             return jsonify({'error': 'Booking not found'}), 404
+            
         conn.commit()
         return jsonify({'message': 'Booking updated successfully'})
     except Exception as e:
@@ -593,20 +595,35 @@ def update_booking(ticket_no):
     finally:
         if conn: conn.close()
 
-@app.route('/api/bookings/<ticket_no>', methods=['DELETE'])
-def delete_booking(ticket_no):
+@app.route('/api/bookings/<book_ref>', methods=['DELETE'])
+def delete_booking(book_ref):
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("BEGIN TRANSACTION")
-        # Cascade delete logic
-        cursor.execute("DELETE FROM ticket_flights WHERE ticket_no = ?", (ticket_no,))
-        cursor.execute("DELETE FROM boarding_passes WHERE ticket_no = ?", (ticket_no,))
-        cursor.execute("DELETE FROM tickets WHERE ticket_no = ?", (ticket_no,))
+        
+        # Cascade Delete: Delete Tickets (and their flights/boarding passes) first
+        # Note: In a real prod DB, ON DELETE CASCADE foreign keys would handle this.
+        # Here we do it manually to be safe.
+        
+        # 1. Get tickets for this booking to delete their dependencies
+        tickets = cursor.execute("SELECT ticket_no FROM tickets WHERE book_ref = ?", (book_ref,)).fetchall()
+        for t in tickets:
+            t_no = t[0]
+            cursor.execute("DELETE FROM ticket_flights WHERE ticket_no = ?", (t_no,))
+            cursor.execute("DELETE FROM boarding_passes WHERE ticket_no = ?", (t_no,))
+            
+        # 2. Delete Tickets
+        cursor.execute("DELETE FROM tickets WHERE book_ref = ?", (book_ref,))
+        
+        # 3. Delete Booking
+        cursor.execute("DELETE FROM bookings WHERE book_ref = ?", (book_ref,))
+        
         if cursor.rowcount == 0:
             conn.rollback()
             return jsonify({'error': 'Booking not found'}), 404
+            
         conn.commit()
         return jsonify({'message': 'Booking deleted successfully'})
     except Exception as e:
@@ -758,36 +775,33 @@ def get_airports():
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
-        search = request.args.get('search', '', type=str)
-        column = request.args.get('column', 'airport_code', type=str)
+        search = request.args.get('search', '')
+        column = request.args.get('column', 'airport_code')
 
-        allowed = ['airport_code', 'airport_name', 'city', 'timezone']
+        # ADDED 'coordinates'
+        allowed = ['airport_code', 'airport_name', 'city', 'timezone', 'coordinates']
         safe_col = validate_column(column, allowed)
 
         conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        if search:
-            cursor.execute(f"SELECT COUNT(*) FROM airports_data WHERE {safe_col} LIKE ?", (f'%{search}%',))
-        else:
-            cursor.execute("SELECT COUNT(*) FROM airports_data")
-        total = cursor.fetchone()[0]
-        
         offset = (page - 1) * per_page
-        if search:
-            cursor.execute(f"SELECT * FROM airports_data WHERE {safe_col} LIKE ? LIMIT ? OFFSET ?", (f'%{search}%', per_page, offset))
-        else:
-            cursor.execute("SELECT * FROM airports_data LIMIT ? OFFSET ?", (per_page, offset))
         
-        raw_airports = cursor.fetchall()
+        if search:
+            total = conn.execute(f"SELECT COUNT(*) FROM airports_data WHERE {safe_col} LIKE ?", (f'%{search}%',)).fetchone()[0]
+            rows = conn.execute(f"SELECT * FROM airports_data WHERE {safe_col} LIKE ? LIMIT ? OFFSET ?", (f'%{search}%', per_page, offset)).fetchall()
+        else:
+            total = conn.execute("SELECT COUNT(*) FROM airports_data").fetchone()[0]
+            rows = conn.execute("SELECT * FROM airports_data LIMIT ? OFFSET ?", (per_page, offset)).fetchall()
+        
+        # Parse JSON fields before returning
         airports = []
-        for row in raw_airports:
+        for row in rows:
             d = dict(row)
             d['airport_name'] = extract_json_value(d['airport_name'])
             d['city'] = extract_json_value(d['city'])
             airports.append(d)
+            
         conn.close()
-        return jsonify({'airports': airports, 'total': total, 'page': page, 'per_page': per_page, 'total_pages': (total + per_page - 1) // per_page})
+        return jsonify({'airports': airports, 'total': total, 'page': page, 'total_pages': (total + per_page - 1) // per_page})
     except Exception as e: return jsonify({'error': str(e)}), 500
 
 @app.route('/api/airports/<airport_code>', methods=['GET'])
@@ -878,6 +892,437 @@ def delete_airport(airport_code):
         return jsonify({'error': str(e)}), 500
     finally:
         if conn: conn.close()
+
+# --- TICKETS (Specific Implementation) ---
+@app.route('/api/tickets', methods=['GET'])
+def get_tickets():
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = 20
+        search = request.args.get('search', '')
+        column = request.args.get('column', 'ticket_no')
+        
+        # Whitelist columns for sorting/searching
+        allowed_cols = ['ticket_no', 'book_ref', 'passenger_id']
+        safe_col = validate_column(column, allowed_cols)
+
+        conn = get_db_connection()
+        offset = (page - 1) * per_page
+        
+        if search:
+            total = conn.execute(f"SELECT COUNT(*) FROM tickets WHERE {safe_col} LIKE ?", (f'%{search}%',)).fetchone()[0]
+            rows = conn.execute(f"SELECT * FROM tickets WHERE {safe_col} LIKE ? ORDER BY ticket_no LIMIT ? OFFSET ?", (f'%{search}%', per_page, offset)).fetchall()
+        else:
+            total = conn.execute("SELECT COUNT(*) FROM tickets").fetchone()[0]
+            rows = conn.execute("SELECT * FROM tickets ORDER BY ticket_no LIMIT ? OFFSET ?", (per_page, offset)).fetchall()
+            
+        conn.close()
+        return jsonify({'tickets': [dict(r) for r in rows], 'total': total, 'page': page, 'total_pages': (total + per_page - 1) // per_page})
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tickets/<ticket_no>', methods=['GET'])
+def get_ticket(ticket_no):
+    try:
+        conn = get_db_connection()
+        row = conn.execute("SELECT * FROM tickets WHERE ticket_no = ?", (ticket_no,)).fetchone()
+        conn.close()
+        if row: return jsonify(dict(row))
+        return jsonify({'error': 'Ticket not found'}), 404
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tickets', methods=['POST'])
+def create_ticket():
+    conn = None
+    try:
+        data = request.get_json()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("BEGIN TRANSACTION")
+        cursor.execute("INSERT INTO tickets (ticket_no, book_ref, passenger_id) VALUES (?, ?, ?)", 
+                       (data['ticket_no'], data['book_ref'], data['passenger_id']))
+        conn.commit()
+        return jsonify({'message': 'Ticket created successfully'}), 201
+    except sqlite3.IntegrityError as e:
+        if conn: conn.rollback()
+        return jsonify({'error': f'Integrity Error: {str(e)}'}), 400
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/tickets/<ticket_no>', methods=['PUT'])
+def update_ticket(ticket_no):
+    conn = None
+    try:
+        data = request.get_json()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("BEGIN TRANSACTION")
+        cursor.execute("UPDATE tickets SET book_ref=?, passenger_id=? WHERE ticket_no=?", 
+                       (data['book_ref'], data['passenger_id'], ticket_no))
+        
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return jsonify({'error': 'Ticket not found'}), 404
+            
+        conn.commit()
+        return jsonify({'message': 'Ticket updated successfully'})
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/tickets/<ticket_no>', methods=['DELETE'])
+def delete_ticket(ticket_no):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("BEGIN TRANSACTION")
+        
+        # Manual Cascade: Delete related boarding passes and ticket_flights first
+        cursor.execute("DELETE FROM boarding_passes WHERE ticket_no = ?", (ticket_no,))
+        cursor.execute("DELETE FROM ticket_flights WHERE ticket_no = ?", (ticket_no,))
+        cursor.execute("DELETE FROM tickets WHERE ticket_no = ?", (ticket_no,))
+        
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return jsonify({'error': 'Ticket not found'}), 404
+            
+        conn.commit()
+        return jsonify({'message': 'Ticket deleted successfully'})
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+# --- TICKET FLIGHTS (Specific Implementation) ---
+@app.route('/api/ticket_flights', methods=['GET'])
+def get_ticket_flights():
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = 20
+        search = request.args.get('search', '')
+        column = request.args.get('column', 'ticket_no')
+        
+        allowed_cols = ['ticket_no', 'flight_id', 'fare_conditions', 'amount']
+        safe_col = validate_column(column, allowed_cols)
+
+        conn = get_db_connection()
+        offset = (page - 1) * per_page
+        
+        if search:
+            total = conn.execute(f"SELECT COUNT(*) FROM ticket_flights WHERE {safe_col} LIKE ?", (f'%{search}%',)).fetchone()[0]
+            rows = conn.execute(f"SELECT * FROM ticket_flights WHERE {safe_col} LIKE ? ORDER BY ticket_no LIMIT ? OFFSET ?", (f'%{search}%', per_page, offset)).fetchall()
+        else:
+            total = conn.execute("SELECT COUNT(*) FROM ticket_flights").fetchone()[0]
+            rows = conn.execute("SELECT * FROM ticket_flights ORDER BY ticket_no LIMIT ? OFFSET ?", (per_page, offset)).fetchall()
+        
+        conn.close()
+        return jsonify({'ticket_flights': [dict(r) for r in rows], 'total': total, 'page': page, 'total_pages': (total + per_page - 1) // per_page})
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ticket_flights/<ids>', methods=['GET'])
+def get_ticket_flight_single(ids):
+    try:
+        # Composite Key Handling
+        ticket_no, flight_id = ids.split('|')
+        conn = get_db_connection()
+        row = conn.execute("SELECT * FROM ticket_flights WHERE ticket_no=? AND flight_id=?", (ticket_no, flight_id)).fetchone()
+        conn.close()
+        if row: return jsonify(dict(row))
+        return jsonify({'error': 'Ticket Flight not found'}), 404
+    except ValueError: return jsonify({'error': 'Invalid ID format. Use ticket_no|flight_id'}), 400
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ticket_flights', methods=['POST'])
+def create_ticket_flight():
+    conn = None
+    try:
+        data = request.get_json()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("BEGIN TRANSACTION")
+        cursor.execute("INSERT INTO ticket_flights (ticket_no, flight_id, fare_conditions, amount) VALUES (?, ?, ?, ?)",
+                       (data['ticket_no'], data['flight_id'], data['fare_conditions'], data['amount']))
+        conn.commit()
+        return jsonify({'message': 'Ticket Flight created'}), 201
+    except sqlite3.IntegrityError as e:
+        if conn: conn.rollback()
+        return jsonify({'error': f'Integrity Error: {str(e)}'}), 400
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/ticket_flights/<ids>', methods=['PUT'])
+def update_ticket_flight(ids):
+    conn = None
+    try:
+        ticket_no, flight_id = ids.split('|')
+        data = request.get_json()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("BEGIN TRANSACTION")
+        cursor.execute("UPDATE ticket_flights SET fare_conditions=?, amount=? WHERE ticket_no=? AND flight_id=?",
+                       (data['fare_conditions'], data['amount'], ticket_no, flight_id))
+        
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return jsonify({'error': 'Ticket Flight not found'}), 404
+            
+        conn.commit()
+        return jsonify({'message': 'Ticket Flight updated'})
+    except ValueError: return jsonify({'error': 'Invalid ID format'}), 400
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/ticket_flights/<ids>', methods=['DELETE'])
+def delete_ticket_flight(ids):
+    conn = None
+    try:
+        ticket_no, flight_id = ids.split('|')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("BEGIN TRANSACTION")
+        cursor.execute("DELETE FROM ticket_flights WHERE ticket_no=? AND flight_id=?", (ticket_no, flight_id))
+        
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return jsonify({'error': 'Ticket Flight not found'}), 404
+            
+        conn.commit()
+        return jsonify({'message': 'Ticket Flight deleted'})
+    except ValueError: return jsonify({'error': 'Invalid ID format'}), 400
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+      # --- SEATS (Specific Implementation) ---
+@app.route('/api/seats', methods=['GET'])
+def get_seats():
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = 20
+        search = request.args.get('search', '')
+        column = request.args.get('column', 'aircraft_code')
+        
+        allowed_cols = ['aircraft_code', 'seat_no', 'fare_conditions']
+        safe_col = validate_column(column, allowed_cols)
+
+        conn = get_db_connection()
+        offset = (page - 1) * per_page
+        
+        if search:
+            total = conn.execute(f"SELECT COUNT(*) FROM seats WHERE {safe_col} LIKE ?", (f'%{search}%',)).fetchone()[0]
+            rows = conn.execute(f"SELECT * FROM seats WHERE {safe_col} LIKE ? ORDER BY aircraft_code LIMIT ? OFFSET ?", (f'%{search}%', per_page, offset)).fetchall()
+        else:
+            total = conn.execute("SELECT COUNT(*) FROM seats").fetchone()[0]
+            rows = conn.execute("SELECT * FROM seats ORDER BY aircraft_code LIMIT ? OFFSET ?", (per_page, offset)).fetchall()
+            
+        conn.close()
+        return jsonify({'seats': [dict(r) for r in rows], 'total': total, 'page': page, 'total_pages': (total + per_page - 1) // per_page})
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/seats/<ids>', methods=['GET'])
+def get_seat_single(ids):
+    try:
+        # Composite Key Handling
+        aircraft_code, seat_no = ids.split('|')
+        conn = get_db_connection()
+        row = conn.execute("SELECT * FROM seats WHERE aircraft_code=? AND seat_no=?", (aircraft_code, seat_no)).fetchone()
+        conn.close()
+        if row: return jsonify(dict(row))
+        return jsonify({'error': 'Seat not found'}), 404
+    except ValueError: return jsonify({'error': 'Invalid ID format. Use aircraft_code|seat_no'}), 400
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/seats', methods=['POST'])
+def create_seat():
+    conn = None
+    try:
+        data = request.get_json()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("BEGIN TRANSACTION")
+        cursor.execute("INSERT INTO seats (aircraft_code, seat_no, fare_conditions) VALUES (?, ?, ?)",
+                       (data['aircraft_code'], data['seat_no'], data['fare_conditions']))
+        conn.commit()
+        return jsonify({'message': 'Seat created successfully'}), 201
+    except sqlite3.IntegrityError as e:
+        if conn: conn.rollback()
+        return jsonify({'error': f'Integrity Error: {str(e)}'}), 400
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/seats/<ids>', methods=['PUT'])
+def update_seat(ids):
+    conn = None
+    try:
+        aircraft_code, seat_no = ids.split('|')
+        data = request.get_json()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("BEGIN TRANSACTION")
+        cursor.execute("UPDATE seats SET fare_conditions=? WHERE aircraft_code=? AND seat_no=?", 
+                       (data['fare_conditions'], aircraft_code, seat_no))
+        
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return jsonify({'error': 'Seat not found'}), 404
+            
+        conn.commit()
+        return jsonify({'message': 'Seat updated successfully'})
+    except ValueError: return jsonify({'error': 'Invalid ID format'}), 400
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/seats/<ids>', methods=['DELETE'])
+def delete_seat(ids):
+    conn = None
+    try:
+        aircraft_code, seat_no = ids.split('|')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("BEGIN TRANSACTION")
+        cursor.execute("DELETE FROM seats WHERE aircraft_code=? AND seat_no=?", (aircraft_code, seat_no))
+        
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return jsonify({'error': 'Seat not found'}), 404
+            
+        conn.commit()
+        return jsonify({'message': 'Seat deleted successfully'})
+    except ValueError: return jsonify({'error': 'Invalid ID format'}), 400
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+# --- BOARDING PASSES (Specific Implementation) ---
+@app.route('/api/boarding_passes', methods=['GET'])
+def get_boarding_passes():
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = 20
+        search = request.args.get('search', '')
+        column = request.args.get('column', 'ticket_no')
+        
+        allowed_cols = ['ticket_no', 'flight_id', 'boarding_no', 'seat_no']
+        safe_col = validate_column(column, allowed_cols)
+
+        conn = get_db_connection()
+        offset = (page - 1) * per_page
+        
+        if search:
+            total = conn.execute(f"SELECT COUNT(*) FROM boarding_passes WHERE {safe_col} LIKE ?", (f'%{search}%',)).fetchone()[0]
+            rows = conn.execute(f"SELECT * FROM boarding_passes WHERE {safe_col} LIKE ? ORDER BY ticket_no LIMIT ? OFFSET ?", (f'%{search}%', per_page, offset)).fetchall()
+        else:
+            total = conn.execute("SELECT COUNT(*) FROM boarding_passes").fetchone()[0]
+            rows = conn.execute("SELECT * FROM boarding_passes ORDER BY ticket_no LIMIT ? OFFSET ?", (per_page, offset)).fetchall()
+            
+        conn.close()
+        return jsonify({'boarding_passes': [dict(r) for r in rows], 'total': total, 'page': page, 'total_pages': (total + per_page - 1) // per_page})
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/boarding_passes/<ids>', methods=['GET'])
+def get_boarding_pass_single(ids):
+    try:
+        ticket_no, flight_id = ids.split('|')
+        conn = get_db_connection()
+        row = conn.execute("SELECT * FROM boarding_passes WHERE ticket_no=? AND flight_id=?", (ticket_no, flight_id)).fetchone()
+        conn.close()
+        if row: return jsonify(dict(row))
+        return jsonify({'error': 'Boarding Pass not found'}), 404
+    except ValueError: return jsonify({'error': 'Invalid ID format. Use ticket_no|flight_id'}), 400
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/boarding_passes', methods=['POST'])
+def create_boarding_pass():
+    conn = None
+    try:
+        data = request.get_json()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("BEGIN TRANSACTION")
+        cursor.execute("INSERT INTO boarding_passes (ticket_no, flight_id, boarding_no, seat_no) VALUES (?, ?, ?, ?)",
+                       (data['ticket_no'], data['flight_id'], data['boarding_no'], data['seat_no']))
+        conn.commit()
+        return jsonify({'message': 'Boarding Pass created'}), 201
+    except sqlite3.IntegrityError as e:
+        if conn: conn.rollback()
+        return jsonify({'error': f'Integrity Error: {str(e)}'}), 400
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/boarding_passes/<ids>', methods=['PUT'])
+def update_boarding_pass(ids):
+    conn = None
+    try:
+        ticket_no, flight_id = ids.split('|')
+        data = request.get_json()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("BEGIN TRANSACTION")
+        cursor.execute("UPDATE boarding_passes SET boarding_no=?, seat_no=? WHERE ticket_no=? AND flight_id=?",
+                       (data['boarding_no'], data['seat_no'], ticket_no, flight_id))
+        
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return jsonify({'error': 'Boarding Pass not found'}), 404
+            
+        conn.commit()
+        return jsonify({'message': 'Boarding Pass updated'})
+    except ValueError: return jsonify({'error': 'Invalid ID format'}), 400
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/boarding_passes/<ids>', methods=['DELETE'])
+def delete_boarding_pass(ids):
+    conn = None
+    try:
+        ticket_no, flight_id = ids.split('|')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("BEGIN TRANSACTION")
+        cursor.execute("DELETE FROM boarding_passes WHERE ticket_no=? AND flight_id=?", (ticket_no, flight_id))
+        
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return jsonify({'error': 'Boarding Pass not found'}), 404
+            
+        conn.commit()
+        return jsonify({'message': 'Boarding Pass deleted'})
+    except ValueError: return jsonify({'error': 'Invalid ID format'}), 400
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+
 
 # =========================================================
 # NOSQL (MONGODB) API ENDPOINTS
@@ -1500,137 +1945,125 @@ def delete_nosql_flight(id):
         
     return jsonify({'message': 'Flight deleted from MongoDB'})
 
-# === NoSQL Booking CRUD (POST/PUT/DELETE) ===
-
+# --- NOSQL BOOKINGS CRUD ---
 @app.route('/api/nosql/bookings', methods=['GET'])
 def get_nosql_bookings_formatted():
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
     search = request.args.get('search', '')
-    column = request.args.get('column', 'ticket_no')
+    column = request.args.get('column', 'book_ref')
     
+    # 1. Map columns to NoSQL fields
+    # If searching by 'book_ref', we search the _id
+    # Otherwise we search the field directly (book_date, total_amount)
     query = {}
     if search:
         if column == 'book_ref':
             query = {'_id': {"$regex": search, "$options": "i"}}
+        elif column == 'total_amount':
+             # Allow numeric search if user types a number
+            try:
+                query = {'total_amount': int(search)}
+            except:
+                query = {'total_amount': -1} # Force empty if invalid number
         else:
-            query = {f'tickets.{column}': {"$regex": search, "$options": "i"}}
+            query = {column: {"$regex": search, "$options": "i"}}
 
+    # 2. Execute Query
     total = mongo.db.bookings.count_documents(query)
-    cursor = mongo.db.bookings.find(query).skip((page-1)*per_page).limit(per_page)
+    # Sort by book_date descending (-1) to match SQL behavior
+    cursor = mongo.db.bookings.find(query).sort("book_date", -1).skip((page-1)*per_page).limit(per_page)
     
+    # 3. Format Output (Return BOOKING data, not Ticket data)
     output = []
     for b in cursor:
-        tickets = b.get('tickets', [])
-        first_ticket = tickets[0] if len(tickets) > 0 else {}
         output.append({
-            'ticket_no': first_ticket.get('ticket_no', 'N/A'),
             'book_ref': b.get('_id'),
-            'passenger_id': first_ticket.get('passenger_id', 'N/A')
-            # UPDATED: Removed name and contact to match SQL
+            'book_date': b.get('book_date'),
+            'total_amount': b.get('total_amount'),
+            'version': b.get('version', 1)
         })
-    return jsonify({'bookings': output, 'total': total, 'page': page, 'total_pages': (total + per_page - 1) // per_page})
+        
+    return jsonify({
+        'bookings': output, 
+        'total': total, 
+        'page': page, 
+        'total_pages': (total + per_page - 1) // per_page
+    })
 
-@app.route('/api/nosql/bookings/<ticket_no>', methods=['GET'])
-def get_nosql_booking_single(ticket_no):
-    booking = mongo.db.bookings.find_one({"tickets.ticket_no": ticket_no})
+@app.route('/api/nosql/bookings/<book_ref>', methods=['GET'])
+def get_nosql_booking_single(book_ref):
+    booking = mongo.db.bookings.find_one({"_id": book_ref})
     if not booking: return jsonify({'error': 'Booking not found'}), 404
     
-    ticket_data = next((t for t in booking.get('tickets', []) if t['ticket_no'] == ticket_no), {})
-    
     return jsonify({
-        'ticket_no': ticket_no,
         'book_ref': booking['_id'],
-        'passenger_id': ticket_data.get('passenger_id'),
+        'book_date': booking.get('book_date'),
+        'total_amount': booking.get('total_amount'),
         'version': booking.get('version', 1)
-        # UPDATED: Removed name and contact
     })
 
 @app.route('/api/nosql/bookings', methods=['POST'])
 def create_nosql_booking():
     data = request.get_json()
-    # UPDATED: Only strictly required fields
-    new_ticket = {
-        'ticket_no': data['ticket_no'],
-        'passenger_id': data['passenger_id'],
-        'flight_legs': [] 
-    }
+    
+    # Validate required fields for a BOOKING
+    if 'book_ref' not in data: 
+        return jsonify({'error': 'Missing book_ref'}), 400
+        
+    # Check for duplicate ID
     existing = mongo.db.bookings.find_one({'_id': data['book_ref']})
     if existing:
-        mongo.db.bookings.update_one(
-            {'_id': data['book_ref']}, 
-            {
-                '$push': {'tickets': new_ticket},
-                '$inc': {'version': 1}
-            }
-        )
-        return jsonify({'message': 'Added ticket to existing booking'}), 201
-    else:
-        new_booking = {
-            '_id': data['book_ref'],
-            'book_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'total_amount': 0,
-            'tickets': [new_ticket],
-            'version': 1
-        }
-        mongo.db.bookings.insert_one(new_booking)
-        return jsonify({'message': 'Created new booking with ticket'}), 201
+        return jsonify({'error': 'Booking Reference already exists'}), 400
 
-@app.route('/api/nosql/bookings/<ticket_no>', methods=['PUT'])
-def update_nosql_booking(ticket_no):
+    new_booking = {
+        '_id': data['book_ref'],
+        'book_date': data.get('book_date', datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        'total_amount': int(data.get('total_amount', 0)),
+        'tickets': [], # Initialize with empty tickets array
+        'version': 1
+    }
+    
+    mongo.db.bookings.insert_one(new_booking)
+    return jsonify({'message': 'Booking created successfully'}), 201
+
+@app.route('/api/nosql/bookings/<book_ref>', methods=['PUT'])
+def update_nosql_booking(book_ref):
     data = request.get_json()
     client_version = data.get('version')
     if client_version is None: return jsonify({'error': 'Missing version'}), 400
 
     update_fields = {}
-    if 'passenger_id' in data: update_fields['tickets.$.passenger_id'] = data['passenger_id']
+    if 'book_date' in data: update_fields['book_date'] = data['book_date']
+    if 'total_amount' in data: update_fields['total_amount'] = int(data['total_amount'])
     
-    update_fields['version'] = int(client_version) + 1
-
+    # Optimistic Locking check
     result = mongo.db.bookings.update_one(
-        {'tickets.ticket_no': ticket_no, 'version': int(client_version)}, 
-        {'$set': update_fields}
-    )
-    
-    if result.matched_count == 0:
-        if mongo.db.bookings.find_one({'tickets.ticket_no': ticket_no}):
-             return jsonify({'error': 'CONCURRENCY CONFLICT: Booking modified by another user.'}), 409
-        return jsonify({'error': 'Ticket not found'}), 404
-        
-    return jsonify({'message': 'Booking updated'})
-
-@app.route('/api/nosql/bookings/<ticket_no>', methods=['DELETE'])
-def delete_nosql_booking(ticket_no):
-    # 1. Find the parent booking document first
-    booking = mongo.db.bookings.find_one({"tickets.ticket_no": ticket_no})
-    
-    # If the booking doesn't exist or ticket isn't in it -> 404
-    if not booking: 
-        return jsonify({'error': 'Ticket not found or already deleted'}), 404
-    
-    book_ref = booking['_id']
-    
-    # 2. Attempt to remove the ticket (Atomic Pull)
-    result = mongo.db.bookings.update_one(
-        {'_id': book_ref, 'tickets.ticket_no': ticket_no}, 
+        {'_id': book_ref, 'version': int(client_version)}, 
         {
-            '$pull': {'tickets': {'ticket_no': ticket_no}},
-            '$inc': {'version': 1} # Important: Increment version of parent doc
+            '$set': update_fields,
+            '$inc': {'version': 1}
         }
     )
     
-    # 3. Check if anything was actually removed
-    if result.modified_count == 0:
-        return jsonify({'error': 'Ticket already deleted by another user'}), 404
-    
-    # 4. Cleanup: If the booking has no more tickets, delete the booking document
-    updated = mongo.db.bookings.find_one({'_id': book_ref})
-    if updated and len(updated.get('tickets', [])) == 0:
-        mongo.db.bookings.delete_one({'_id': book_ref})
-        return jsonify({'message': 'Ticket deleted and empty booking removed'})
+    if result.matched_count == 0:
+        if mongo.db.bookings.find_one({'_id': book_ref}):
+             return jsonify({'error': 'CONCURRENCY CONFLICT: Modified by another user'}), 409
+        return jsonify({'error': 'Booking not found'}), 404
         
-    return jsonify({'message': 'Ticket deleted from booking'})
+    return jsonify({'message': 'Booking updated'})
 
+@app.route('/api/nosql/bookings/<book_ref>', methods=['DELETE'])
+def delete_nosql_booking(book_ref):
+    # Strictly delete the Booking Document by ID
+    result = mongo.db.bookings.delete_one({'_id': book_ref})
+    
+    if result.deleted_count == 0:
+        return jsonify({'error': 'Booking not found or already deleted'}), 404
+        
+    return jsonify({'message': 'Booking deleted from MongoDB'})
+
+# --- NOSQL AIRCRAFTS CRUD ---
 @app.route('/api/nosql/aircraft/<id>', methods=['GET'])
 def get_nosql_aircraft_single(id):
     doc = mongo.db.aircrafts.find_one({'_id': id})
@@ -1712,6 +2145,7 @@ def delete_nosql_aircraft(id):
         
     return jsonify({'message': 'Aircraft deleted'})
 
+# --- NOSQL AIRPORTS CRUD ---
 @app.route('/api/nosql/airports/<id>', methods=['GET'])
 def get_nosql_airport_single(id):
     doc = mongo.db.airports.find_one({'_id': id})
@@ -1797,6 +2231,511 @@ def delete_nosql_airport(id):
         return jsonify({'error': 'Airport not found or already deleted'}), 404
         
     return jsonify({'message': 'Airport deleted'})
+
+# --- NOSQL TICKETS CRUD ---
+@app.route('/api/nosql/tickets', methods=['GET'])
+def get_nosql_tickets():
+    page = int(request.args.get('page', 1))
+    per_page = 20
+    search = request.args.get('search', '')
+    
+    pipeline = []
+    
+    # 1. Search Optimization: Filter parents first if possible
+    if search:
+        pipeline.append({
+            "$match": {
+                "$or": [
+                    {"_id": {"$regex": search, "$options": "i"}}, # Search by Book Ref
+                    {"tickets.ticket_no": {"$regex": search, "$options": "i"}}, # Search by Ticket No
+                    {"tickets.passenger_id": {"$regex": search, "$options": "i"}} # Search by Passenger ID
+                ]
+            }
+        })
+
+    # 2. Flatten the tickets array
+    pipeline.extend([
+        {"$unwind": "$tickets"},
+        {"$project": {
+            "ticket_no": "$tickets.ticket_no",
+            "book_ref": "$_id", # The Booking ID is the Book Ref
+            "passenger_id": "$tickets.passenger_id",
+            "_id": 0
+        }}
+    ])
+
+    # 3. Apply Search again on the flattened fields (for exact column matching)
+    if search:
+        pipeline.append({
+            "$match": {
+                "$or": [
+                    {"ticket_no": {"$regex": search, "$options": "i"}},
+                    {"book_ref": {"$regex": search, "$options": "i"}},
+                    {"passenger_id": {"$regex": search, "$options": "i"}}
+                ]
+            }
+        })
+
+    # 4. Pagination (Count total before slicing)
+    # Note: Counting unwound documents is expensive but necessary for this view
+    count_pipeline = pipeline[:]
+    count_pipeline.append({"$count": "total"})
+    
+    try:
+        count_res = list(mongo.db.bookings.aggregate(count_pipeline))
+        total = count_res[0]['total'] if count_res else 0
+        
+        # 5. Slice for Page
+        pipeline.extend([
+            {"$skip": (page - 1) * per_page},
+            {"$limit": per_page}
+        ])
+        
+        results = list(mongo.db.bookings.aggregate(pipeline))
+        
+        return jsonify({
+            'tickets': results,
+            'total': total,
+            'page': page,
+            'total_pages': (total + per_page - 1) // per_page
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/nosql/tickets/<ticket_no>', methods=['GET'])
+def get_nosql_ticket_single(ticket_no):
+    # Use aggregate to find the specific ticket inside the array
+    pipeline = [
+        {"$match": {"tickets.ticket_no": ticket_no}},
+        {"$unwind": "$tickets"},
+        {"$match": {"tickets.ticket_no": ticket_no}},
+        {"$project": {
+            "ticket_no": "$tickets.ticket_no",
+            "book_ref": "$_id",
+            "passenger_id": "$tickets.passenger_id",
+            "version": {"$ifNull": ["$version", 1]},
+            "_id": 0
+        }}
+    ]
+    result = list(mongo.db.bookings.aggregate(pipeline))
+    if result: return jsonify(result[0])
+    return jsonify({'error': 'Ticket not found'}), 404
+
+@app.route('/api/nosql/tickets', methods=['POST'])
+def create_nosql_ticket():
+    data = request.get_json()
+    new_ticket = {
+        "ticket_no": data['ticket_no'],
+        "passenger_id": data['passenger_id'],
+        "flight_legs": [] # Initialize empty legs
+    }
+    # Push to the specific booking's ticket array
+    result = mongo.db.bookings.update_one(
+        {"_id": data['book_ref']},
+        {"$push": {"tickets": new_ticket}, "$inc": {"version": 1}}
+    )
+    if result.matched_count == 0:
+        return jsonify({'error': 'Booking reference not found'}), 404
+    return jsonify({'message': 'Ticket created'}), 201
+
+@app.route('/api/nosql/tickets/<ticket_no>', methods=['PUT'])
+def update_nosql_ticket(ticket_no):
+    data = request.get_json()
+    # Update specific ticket in the array using positional operator $
+    result = mongo.db.bookings.update_one(
+        {"tickets.ticket_no": ticket_no},
+        {
+            "$set": {"tickets.$.passenger_id": data['passenger_id']},
+            "$inc": {"version": 1}
+        }
+    )
+    if result.matched_count == 0: return jsonify({'error': 'Ticket not found'}), 404
+    return jsonify({'message': 'Ticket updated'})
+
+@app.route('/api/nosql/tickets/<ticket_no>', methods=['DELETE'])
+def delete_nosql_ticket(ticket_no):
+    # Pull the ticket from the array
+    result = mongo.db.bookings.update_one(
+        {"tickets.ticket_no": ticket_no},
+        {"$pull": {"tickets": {"ticket_no": ticket_no}}, "$inc": {"version": 1}}
+    )
+    if result.matched_count == 0: return jsonify({'error': 'Ticket not found'}), 404
+    return jsonify({'message': 'Ticket deleted'})
+
+# --- NOSQL TICKET FLIGHTS CRUD ---
+@app.route('/api/nosql/ticket_flights', methods=['GET'])
+def get_nosql_ticket_flights():
+    page = int(request.args.get('page', 1))
+    per_page = 20
+    search = request.args.get('search', '')
+    
+    pipeline = [
+        {"$unwind": "$tickets"},
+        {"$unwind": "$tickets.flight_legs"},
+        {"$project": {
+            "ticket_no": "$tickets.ticket_no",
+            "flight_id": {"$toString": "$tickets.flight_legs.flight_id"},
+            "fare_conditions": "$tickets.flight_legs.fare_conditions",
+            "amount": "$tickets.flight_legs.amount",
+            "_id": 0
+        }}
+    ]
+    
+    if search:
+        pipeline.append({
+            "$match": {
+                "ticket_no": {"$regex": search, "$options": "i"}
+            }
+        })
+
+    # Pagination Logic
+    count_pipeline = pipeline[:]
+    count_pipeline.append({"$count": "total"})
+    
+    try:
+        count_res = list(mongo.db.bookings.aggregate(count_pipeline))
+        total = count_res[0]['total'] if count_res else 0
+        
+        pipeline.extend([
+            {"$skip": (page - 1) * per_page},
+            {"$limit": per_page}
+        ])
+        
+        results = list(mongo.db.bookings.aggregate(pipeline))
+        return jsonify({
+            'ticket_flights': results, 
+            'total': total, 
+            'page': page, 
+            'total_pages': (total + per_page - 1) // per_page
+        })
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/nosql/ticket_flights/<ids>', methods=['GET'])
+def get_nosql_ticket_flight_single(ids):
+    try:
+        ticket_no, flight_id = ids.split('|')
+        pipeline = [
+            {"$match": {"tickets.ticket_no": ticket_no}},
+            {"$unwind": "$tickets"},
+            {"$match": {"tickets.ticket_no": ticket_no}},
+            {"$unwind": "$tickets.flight_legs"},
+            # Ensure flight_id is compared as string vs int depending on your data
+            {"$match": {"tickets.flight_legs.flight_id": int(flight_id)}}, 
+            {"$project": {
+                "ticket_no": "$tickets.ticket_no",
+                "flight_id": "$tickets.flight_legs.flight_id",
+                "fare_conditions": "$tickets.flight_legs.fare_conditions",
+                "amount": "$tickets.flight_legs.amount",
+                "_id": 0
+            }}
+        ]
+        result = list(mongo.db.bookings.aggregate(pipeline))
+        if result: return jsonify(result[0])
+        return jsonify({'error': 'Flight Leg not found'}), 404
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/nosql/ticket_flights', methods=['POST'])
+def create_nosql_ticket_flight():
+    data = request.get_json()
+    new_leg = {
+        "flight_id": int(data['flight_id']),
+        "fare_conditions": data['fare_conditions'],
+        "amount": float(data['amount'])
+    }
+    result = mongo.db.bookings.update_one(
+        {"tickets.ticket_no": data['ticket_no']},
+        {"$push": {"tickets.$.flight_legs": new_leg}, "$inc": {"version": 1}}
+    )
+    if result.matched_count == 0: return jsonify({'error': 'Ticket not found'}), 404
+    return jsonify({'message': 'Flight leg added'}), 201
+
+@app.route('/api/nosql/ticket_flights/<ids>', methods=['PUT'])
+def update_nosql_ticket_flight(ids):
+    try:
+        ticket_no, flight_id = ids.split('|')
+        data = request.get_json()
+        
+        # Use arrayFilters to update the specific leg inside the specific ticket
+        result = mongo.db.bookings.update_one(
+            {"tickets.ticket_no": ticket_no},
+            {
+                "$set": {
+                    "tickets.$[t].flight_legs.$[f].fare_conditions": data['fare_conditions'],
+                    "tickets.$[t].flight_legs.$[f].amount": float(data['amount'])
+                },
+                "$inc": {"version": 1}
+            },
+            array_filters=[
+                {"t.ticket_no": ticket_no},
+                {"f.flight_id": int(flight_id)}
+            ]
+        )
+        if result.matched_count == 0: return jsonify({'error': 'Record not found'}), 404
+        return jsonify({'message': 'Updated'})
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/nosql/ticket_flights/<ids>', methods=['DELETE'])
+def delete_nosql_ticket_flight(ids):
+    try:
+        ticket_no, flight_id = ids.split('|')
+        result = mongo.db.bookings.update_one(
+            {"tickets.ticket_no": ticket_no},
+            {
+                "$pull": {"tickets.$.flight_legs": {"flight_id": int(flight_id)}},
+                "$inc": {"version": 1}
+            }
+        )
+        if result.matched_count == 0: return jsonify({'error': 'Record not found'}), 404
+        return jsonify({'message': 'Deleted'})
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+# --- NOSQL SEATS CRUD ---
+@app.route('/api/nosql/seats', methods=['GET'])
+def get_nosql_seats():
+    page = int(request.args.get('page', 1))
+    per_page = 20
+    search = request.args.get('search', '')
+    
+    pipeline = [
+        {"$unwind": "$seats"},
+        {"$project": {
+            "aircraft_code": "$_id",
+            "seat_no": "$seats.seat_no",
+            "fare_conditions": "$seats.fare_conditions",
+            "_id": 0
+        }}
+    ]
+
+    if search:
+        pipeline.append({
+            "$match": {
+                "aircraft_code": {"$regex": search, "$options": "i"}
+            }
+        })
+
+    count_pipeline = pipeline[:]
+    count_pipeline.append({"$count": "total"})
+    
+    try:
+        count_res = list(mongo.db.aircrafts.aggregate(count_pipeline))
+        total = count_res[0]['total'] if count_res else 0
+        
+        pipeline.extend([
+            {"$skip": (page - 1) * per_page},
+            {"$limit": per_page}
+        ])
+        
+        results = list(mongo.db.aircrafts.aggregate(pipeline))
+        return jsonify({
+            'seats': results, 
+            'total': total, 
+            'page': page, 
+            'total_pages': (total + per_page - 1) // per_page
+        })
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/nosql/seats/<ids>', methods=['GET'])
+def get_nosql_seat_single(ids):
+    try:
+        ac_code, seat_no = ids.split('|')
+        pipeline = [
+            {"$match": {"_id": ac_code}},
+            {"$unwind": "$seats"},
+            {"$match": {"seats.seat_no": seat_no}},
+            {"$project": {
+                "aircraft_code": "$_id",
+                "seat_no": "$seats.seat_no",
+                "fare_conditions": "$seats.fare_conditions",
+                "_id": 0
+            }}
+        ]
+        result = list(mongo.db.aircrafts.aggregate(pipeline))
+        if result: return jsonify(result[0])
+        return jsonify({'error': 'Seat not found'}), 404
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/nosql/seats', methods=['POST'])
+def create_nosql_seat():
+    data = request.get_json()
+    new_seat = {
+        "seat_no": data['seat_no'],
+        "fare_conditions": data['fare_conditions']
+    }
+    result = mongo.db.aircrafts.update_one(
+        {"_id": data['aircraft_code']},
+        {"$push": {"seats": new_seat}, "$inc": {"version": 1}}
+    )
+    if result.matched_count == 0: return jsonify({'error': 'Aircraft not found'}), 404
+    return jsonify({'message': 'Seat created'}), 201
+
+@app.route('/api/nosql/seats/<ids>', methods=['PUT'])
+def update_nosql_seat(ids):
+    try:
+        ac_code, seat_no = ids.split('|')
+        data = request.get_json()
+        
+        # Update specific seat in the array
+        result = mongo.db.aircrafts.update_one(
+            {"_id": ac_code, "seats.seat_no": seat_no},
+            {
+                "$set": {"seats.$.fare_conditions": data['fare_conditions']},
+                "$inc": {"version": 1}
+            }
+        )
+        if result.matched_count == 0: return jsonify({'error': 'Seat not found'}), 404
+        return jsonify({'message': 'Seat updated'})
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/nosql/seats/<ids>', methods=['DELETE'])
+def delete_nosql_seat(ids):
+    try:
+        ac_code, seat_no = ids.split('|')
+        result = mongo.db.aircrafts.update_one(
+            {"_id": ac_code},
+            {"$pull": {"seats": {"seat_no": seat_no}}, "$inc": {"version": 1}}
+        )
+        if result.matched_count == 0: return jsonify({'error': 'Seat not found'}), 404
+        return jsonify({'message': 'Seat deleted'})
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+# --- NOSQL BOARDING PASSES CRUD ---
+@app.route('/api/nosql/boarding_passes', methods=['GET'])
+def get_nosql_boarding_passes():
+    page = int(request.args.get('page', 1))
+    per_page = 20
+    search = request.args.get('search', '')
+    
+    pipeline = [
+        {"$unwind": "$tickets"},
+        {"$unwind": "$tickets.flight_legs"},
+        # Only show legs that have a boarding pass
+        {"$match": {"tickets.flight_legs.boarding_pass": {"$exists": True}}},
+        {"$project": {
+            "ticket_no": "$tickets.ticket_no",
+            "flight_id": {"$toString": "$tickets.flight_legs.flight_id"},
+            "boarding_no": "$tickets.flight_legs.boarding_pass.boarding_no",
+            "seat_no": "$tickets.flight_legs.boarding_pass.seat_no",
+            "_id": 0
+        }}
+    ]
+
+    if search:
+        pipeline.append({
+            "$match": {
+                "ticket_no": {"$regex": search, "$options": "i"}
+            }
+        })
+
+    count_pipeline = pipeline[:]
+    count_pipeline.append({"$count": "total"})
+    
+    try:
+        count_res = list(mongo.db.bookings.aggregate(count_pipeline))
+        total = count_res[0]['total'] if count_res else 0
+        
+        pipeline.extend([
+            {"$skip": (page - 1) * per_page},
+            {"$limit": per_page}
+        ])
+        
+        results = list(mongo.db.bookings.aggregate(pipeline))
+        return jsonify({
+            'boarding_passes': results, 
+            'total': total, 
+            'page': page, 
+            'total_pages': (total + per_page - 1) // per_page
+        })
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/nosql/boarding_passes/<ids>', methods=['GET'])
+def get_nosql_bp_single(ids):
+    try:
+        ticket_no, flight_id = ids.split('|')
+        pipeline = [
+            {"$match": {"tickets.ticket_no": ticket_no}},
+            {"$unwind": "$tickets"},
+            {"$match": {"tickets.ticket_no": ticket_no}},
+            {"$unwind": "$tickets.flight_legs"},
+            {"$match": {"tickets.flight_legs.flight_id": int(flight_id)}},
+            {"$project": {
+                "ticket_no": "$tickets.ticket_no",
+                "flight_id": "$tickets.flight_legs.flight_id",
+                "boarding_no": "$tickets.flight_legs.boarding_pass.boarding_no",
+                "seat_no": "$tickets.flight_legs.boarding_pass.seat_no",
+                "_id": 0
+            }}
+        ]
+        result = list(mongo.db.bookings.aggregate(pipeline))
+        # Ensure boarding pass data actually exists
+        if result and result[0].get('boarding_no'): return jsonify(result[0])
+        return jsonify({'error': 'Boarding Pass not found'}), 404
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/nosql/boarding_passes', methods=['POST'])
+def create_nosql_bp():
+    data = request.get_json()
+    bp_data = {
+        "boarding_no": int(data['boarding_no']),
+        "seat_no": data['seat_no']
+    }
+    # Set the boarding_pass field on the specific flight leg
+    result = mongo.db.bookings.update_one(
+        {"tickets.ticket_no": data['ticket_no']},
+        {
+            "$set": {"tickets.$[t].flight_legs.$[f].boarding_pass": bp_data},
+            "$inc": {"version": 1}
+        },
+        array_filters=[
+            {"t.ticket_no": data['ticket_no']},
+            {"f.flight_id": int(data['flight_id'])}
+        ]
+    )
+    if result.matched_count == 0: return jsonify({'error': 'Ticket/Flight not found'}), 404
+    return jsonify({'message': 'Boarding pass created'}), 201
+
+@app.route('/api/nosql/boarding_passes/<ids>', methods=['PUT'])
+def update_nosql_bp(ids):
+    try:
+        ticket_no, flight_id = ids.split('|')
+        data = request.get_json()
+        
+        result = mongo.db.bookings.update_one(
+            {"tickets.ticket_no": ticket_no},
+            {
+                "$set": {
+                    "tickets.$[t].flight_legs.$[f].boarding_pass.boarding_no": int(data['boarding_no']),
+                    "tickets.$[t].flight_legs.$[f].boarding_pass.seat_no": data['seat_no']
+                },
+                "$inc": {"version": 1}
+            },
+            array_filters=[
+                {"t.ticket_no": ticket_no},
+                {"f.flight_id": int(flight_id)}
+            ]
+        )
+        if result.matched_count == 0: return jsonify({'error': 'Record not found'}), 404
+        return jsonify({'message': 'Updated'})
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/nosql/boarding_passes/<ids>', methods=['DELETE'])
+def delete_nosql_bp(ids):
+    try:
+        ticket_no, flight_id = ids.split('|')
+        # Unset the field to delete it
+        result = mongo.db.bookings.update_one(
+            {"tickets.ticket_no": ticket_no},
+            {
+                "$unset": {"tickets.$[t].flight_legs.$[f].boarding_pass": ""},
+                "$inc": {"version": 1}
+            },
+            array_filters=[
+                {"t.ticket_no": ticket_no},
+                {"f.flight_id": int(flight_id)}
+            ]
+        )
+        if result.matched_count == 0: return jsonify({'error': 'Record not found'}), 404
+        return jsonify({'message': 'Deleted'})
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     try:

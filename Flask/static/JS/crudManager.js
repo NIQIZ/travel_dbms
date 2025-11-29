@@ -1,8 +1,26 @@
+// ==========================================
+// STATE & CONFIG
+// ==========================================
 let currentTab = localStorage.getItem('crud_currentTab') || 'flights';
+let crudUseNoSQL = localStorage.getItem('crud_useNoSQL') === 'true';
 let currentPage = 1;
-let currentMode = 'create'; // 'create' or 'edit'
-let currentRecordId = null;
-let crudUseNoSQL = localStorage.getItem('crud_useNoSQL') === 'true'; // State for toggle
+let currentMode = 'create'; 
+let currentRecordId = null; // Can be object for composite keys
+let lastDataSnapshot = "";
+let pollingInterval = null;
+
+// ==========================================
+// INIT & UI
+// ==========================================
+document.addEventListener('DOMContentLoaded', function() {
+    const toggle = document.getElementById('crudToggle');
+    if (toggle) {
+        toggle.checked = crudUseNoSQL;
+        updateCrudUI();
+    }
+    // Set active tab
+    switchTab(currentTab);
+});
 
 function updateCrudUI() {
     const title = document.getElementById('page-title');
@@ -14,702 +32,414 @@ function updateCrudUI() {
         title.style.color = "#2E7D32";
         labelSql.style.color = "#aaa";
         labelNoSql.style.color = "#4CAF50";
+        startPolling();
     } else {
         title.textContent = "Database Management (SQLite)";
         title.style.color = "#667eea";
         labelSql.style.color = "#2196F3";
         labelNoSql.style.color = "#aaa";
+        stopPolling();
     }
 }
 
-
-// Toggle Source Function
 function toggleCrudSource() {
-    const toggle = document.getElementById('crudToggle');
-    crudUseNoSQL = toggle.checked;
-    
-    // Save to storage
+    crudUseNoSQL = document.getElementById('crudToggle').checked;
     localStorage.setItem('crud_useNoSQL', crudUseNoSQL);
-    
     updateCrudUI();
-    
     currentPage = 1;
     loadData();
 }
 
-// Tab switching
 function switchTab(tab) {
     currentTab = tab;
-    // Save to storage
     localStorage.setItem('crud_currentTab', tab);
-    
     currentPage = 1;
+    lastDataSnapshot = ""; // Reset snapshot
     
-    // Update tab buttons
+    // Update Buttons
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    // Find button by onclick attribute to set active class safely
     const btn = document.querySelector(`button[onclick="switchTab('${tab}')"]`);
     if(btn) btn.classList.add('active');
     
-    // Update tab content
+    // Update Content
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-    const tabContent = document.getElementById(`${tab}-tab`);
-    if(tabContent) tabContent.classList.add('active');
+    const content = document.getElementById(`${tab}-tab`);
+    if(content) content.classList.add('active');
     
-    // Load data
     loadData();
 }
 
-// Load data based on current tab
-async function loadData(search = '', column = '') {
+// ==========================================
+// DATA LOADING
+// ==========================================
+async function loadData() {
     const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
     const endpoint = `${prefix}/${currentTab}`;
     
-    // Add column to params
+    // Get search inputs specific to the tab
+    const searchInput = document.getElementById(`${currentTab}-search`);
+    const colInput = document.getElementById(`${currentTab}-search-col`);
+    
     const params = new URLSearchParams({
         page: currentPage,
         per_page: 20,
-        search: search,
-        column: column 
+        search: searchInput ? searchInput.value : '',
+        column: colInput ? colInput.value : '' 
     });
-    
+
     try {
         const response = await fetch(`${endpoint}?${params}`);
         const data = await response.json();
         
-        if (currentTab === 'flights') {
-            renderFlights(data.flights);
-            renderPagination('flights', data);
-        } else if (currentTab === 'bookings') {
-            renderBookings(data.bookings);
-            renderPagination('bookings', data);
-        } else if (currentTab === 'aircraft') {
-            renderAircraft(data.aircraft);
-            renderPagination('aircraft', data);
-        } else if (currentTab === 'airports') {
-            renderAirports(data.airports);
-            renderPagination('airports', data);
-        }
+        // Handle rendering based on tab
+        const list = data[currentTab] || []; // Assumes API returns key matching tab name
+        
+        if (currentTab === 'flights') renderFlights(list);
+        else if (currentTab === 'aircraft') renderAircraft(list);
+        else if (currentTab === 'airports') renderAirports(list);
+        else if (currentTab === 'bookings') renderBookings(list);
+        else if (currentTab === 'tickets') renderTickets(list);
+        else if (currentTab === 'ticket_flights') renderTicketFlights(list);
+        else if (currentTab === 'seats') renderSeats(list);
+        else if (currentTab === 'boarding_passes') renderBoardingPasses(list);
+        
+        renderPagination(data);
+        
+        if (crudUseNoSQL) lastDataSnapshot = JSON.stringify(list);
+
     } catch (error) {
-        console.error('Error loading data:', error);
-        showMessage(currentTab, 'Error loading data', 'error');
+        console.error(error);
+        showMessage('Error loading data');
     }
 }
 
-// Render flights table
-function renderFlights(flights) {
-    const tbody = document.getElementById('flights-tbody');
-    
-    if (!flights || flights.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="loading">No flights found</td></tr>';
-        return;
-    }
-    
-    tbody.innerHTML = flights.map(flight => `
-        <tr>
-            <td>${flight.flight_id}</td>
-            <td>${flight.flight_no}</td>
-            <td>${flight.departure_airport} → ${flight.arrival_airport}</td>
-            <td>${formatDateTime(flight.scheduled_departure)}</td>
-            <td><span class="badge badge-${getStatusBadge(flight.status)}">${flight.status}</span></td>
-            <td>${flight.aircraft_code}</td>
-            <td>
-                <div class="action-buttons">
-                    <button class="btn btn-warning btn-sm" onclick="editFlight('${flight.flight_id}')">✏️ Edit</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteFlight('${flight.flight_id}')">🗑️ Delete</button>
-                </div>
-            </td>
-        </tr>
-    `).join('');
-}
-
-// Render bookings table
-function renderBookings(bookings) {
-    const tbody = document.getElementById('bookings-tbody');
-    if (!bookings || bookings.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="loading">No bookings found</td></tr>';
-        return;
-    }
-    tbody.innerHTML = bookings.map(booking => `
-        <tr>
-            <td>${booking.ticket_no}</td>
-            <td>${booking.book_ref}</td>
-            <td>${booking.passenger_id}</td>
-            <td>
-                <div class="action-buttons">
-                    <button class="btn btn-warning btn-sm" onclick="editBooking('${booking.ticket_no}')">✏️ Edit</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteBooking('${booking.ticket_no}')">🗑️ Delete</button>
-                </div>
-            </td>
-        </tr>
-    `).join('');
-}
-
-// Render aircraft table
-function renderAircraft(aircraft) {
-    const tbody = document.getElementById('aircraft-tbody');
-    
-    if (!aircraft || aircraft.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="loading">No aircraft found</td></tr>';
-        return;
-    }
-    
-    tbody.innerHTML = aircraft.map(ac => `
-        <tr>
-            <td>${ac.aircraft_code}</td>
-            <td>${ac.model}</td>
-            <td>${(ac.range || 0).toLocaleString()}</td>
-            <td>
-                <div class="action-buttons">
-                    <button class="btn btn-warning btn-sm" onclick="editAircraft('${ac.aircraft_code}')">✏️ Edit</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteAircraft('${ac.aircraft_code}')">🗑️ Delete</button>
-                </div>
-            </td>
-        </tr>
-    `).join('');
-}
-
-// NEW: Render Airports Table
-function renderAirports(airports) {
-    const tbody = document.getElementById('airports-tbody');
-    
-    if (!airports || airports.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="loading">No airports found</td></tr>';
-        return;
-    }
-    
-    tbody.innerHTML = airports.map(ap => `
-        <tr>
-            <td>${ap.airport_code}</td>
-            <td>${ap.airport_name}</td>
-            <td>${ap.city}</td>
-            <td>${ap.timezone}</td>
-            <td>
-                <div class="action-buttons">
-                    <button class="btn btn-warning btn-sm" onclick="editAirport('${ap.airport_code}')">✏️ Edit</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteAirport('${ap.airport_code}')">🗑️ Delete</button>
-                </div>
-            </td>
-        </tr>
-    `).join('');
-}
-
-// Render pagination
-function renderPagination(type, data) {
-    const pagination = document.getElementById(`${type}-pagination`);
-    
-    pagination.innerHTML = `
-        <button onclick="changePage(${data.page - 1})" ${data.page === 1 ? 'disabled' : ''}>
-            « Previous
-        </button>
-        <span>Page ${data.page} of ${data.total_pages}</span>
-        <button onclick="changePage(${data.page + 1})" ${data.page === data.total_pages ? 'disabled' : ''}>
-            Next »
-        </button>
-    `;
-}
-
-function changePage(page) {
-    currentPage = page;
+function searchData(tab) {
+    currentPage = 1;
     loadData();
 }
 
-// Search functions
-function searchFlights() {
-    const search = document.getElementById('flights-search').value;
-    const col = document.getElementById('flights-search-col').value;
-    currentPage = 1;
-    loadData(search, col);
+// ==========================================
+// RENDER FUNCTIONS (Columns match Relational Schema)
+// ==========================================
+
+function renderFlights(list) {
+    const tbody = document.getElementById('flights-tbody');
+    // Updated to show Dep/Arr separately, plus Actual times and Scheduled Arrival
+    tbody.innerHTML = list.map(d => `
+        <tr>
+            <td>${d.flight_id}</td>
+            <td>${d.flight_no}</td>
+            <td>${d.departure_airport}</td>
+            <td>${d.arrival_airport}</td>
+            <td>${formatDate(d.scheduled_departure)}</td>
+            <td>${formatDate(d.scheduled_arrival)}</td>
+            <td><span class="badge badge-info">${d.status}</span></td>
+            <td>${d.aircraft_code}</td>
+            <td class="small text-muted">${formatDate(d.actual_departure)}</td>
+            <td class="small text-muted">${formatDate(d.actual_arrival)}</td>
+            <td>${renderActions(d.flight_id)}</td>
+        </tr>`).join('') || noData(11);
 }
 
-function searchBookings() {
-    const search = document.getElementById('bookings-search').value;
-    const col = document.getElementById('bookings-search-col').value;
-    currentPage = 1;
-    loadData(search, col);
+function renderAircraft(list) {
+    const tbody = document.getElementById('aircraft-tbody');
+    tbody.innerHTML = list.map(d => `
+        <tr>
+            <td>${d.aircraft_code}</td><td>${d.model}</td><td>${d.range}</td>
+            <td>${renderActions(d.aircraft_code)}</td>
+        </tr>`).join('') || noData(4);
 }
 
-function searchAircraft() {
-    const search = document.getElementById('aircraft-search').value;
-    const col = document.getElementById('aircraft-search-col').value;
-    currentPage = 1;
-    loadData(search, col);
+function renderAirports(list) {
+    const tbody = document.getElementById('airports-tbody');
+    // Added Coordinates column
+    tbody.innerHTML = list.map(d => `
+        <tr>
+            <td>${d.airport_code}</td>
+            <td>${d.airport_name}</td>
+            <td>${d.city}</td>
+            <td class="small">${d.coordinates || ''}</td>
+            <td>${d.timezone}</td>
+            <td>${renderActions(d.airport_code)}</td>
+        </tr>`).join('') || noData(6);
 }
 
-function searchAirports() {
-    const search = document.getElementById('airports-search').value;
-    const col = document.getElementById('airports-search-col').value;
-    currentPage = 1;
-    loadData(search, col);
+function renderBookings(list) {
+    const tbody = document.getElementById('bookings-tbody');
+    tbody.innerHTML = list.map(d => `
+        <tr>
+            <td>${d.book_ref}</td><td>${formatDate(d.book_date)}</td><td>${d.total_amount}</td>
+            <td>${renderActions(d.book_ref)}</td>
+        </tr>`).join('') || noData(4);
 }
 
-// Modal functions
-function openCreateModal(type) {
+function renderTickets(list) {
+    const tbody = document.getElementById('tickets-tbody');
+    tbody.innerHTML = list.map(d => `
+        <tr>
+            <td>${d.ticket_no}</td><td>${d.book_ref}</td><td>${d.passenger_id}</td>
+            <td>${renderActions(d.ticket_no)}</td>
+        </tr>`).join('') || noData(4);
+}
+
+function renderTicketFlights(list) {
+    const tbody = document.getElementById('ticket_flights-tbody');
+    tbody.innerHTML = list.map(d => `
+        <tr>
+            <td>${d.ticket_no}</td><td>${d.flight_id}</td><td>${d.fare_conditions}</td><td>${d.amount}</td>
+            <td>${renderActions(d.ticket_no + '|' + d.flight_id)}</td> </tr>`).join('') || noData(5);
+}
+
+function renderSeats(list) {
+    const tbody = document.getElementById('seats-tbody');
+    tbody.innerHTML = list.map(d => `
+        <tr>
+            <td>${d.aircraft_code}</td><td>${d.seat_no}</td><td>${d.fare_conditions}</td>
+            <td>${renderActions(d.aircraft_code + '|' + d.seat_no)}</td>
+        </tr>`).join('') || noData(4);
+}
+
+function renderBoardingPasses(list) {
+    const tbody = document.getElementById('boarding_passes-tbody');
+    tbody.innerHTML = list.map(d => `
+        <tr>
+            <td>${d.ticket_no}</td><td>${d.flight_id}</td><td>${d.boarding_no}</td><td>${d.seat_no}</td>
+            <td>${renderActions(d.ticket_no + '|' + d.flight_id)}</td>
+        </tr>`).join('') || noData(5);
+}
+
+// Helper for actions (Edit/Delete)
+function renderActions(id) {
+    return `<div class="action-buttons">
+        <button class="btn btn-warning btn-sm" onclick="openEditModal('${id}')">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteRecord('${id}')">🗑️</button>
+    </div>`;
+}
+
+function noData(cols) { return `<tr><td colspan="${cols}" class="loading">No data found</td></tr>`; }
+
+function renderPagination(data) {
+    const div = document.getElementById(`${currentTab}-pagination`);
+    if(div) div.innerHTML = `
+        <button onclick="currentPage--; loadData()" ${data.page <= 1 ? 'disabled' : ''}>« Prev</button>
+        <span>Page ${data.page} of ${data.total_pages}</span>
+        <button onclick="currentPage++; loadData()" ${data.page >= data.total_pages ? 'disabled' : ''}>Next »</button>
+    `;
+}
+
+// ==========================================
+// MODAL & FORMS
+// ==========================================
+function openCreateModal() {
     currentMode = 'create';
     currentRecordId = null;
-    document.getElementById('modal-title').textContent = `Create New ${capitalizeFirst(type)}`;
+    showModal('Create Record', getFormHtml({}));
+}
+
+async function openEditModal(id) {
+    currentMode = 'edit';
+    currentRecordId = id;
     
-    const formHtml = getFormHtml(type, null);
-    document.getElementById('modal-form').innerHTML = formHtml;
+    // For composite keys (seat, ticket_flight), we split by '|'
+    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
+    
+    // Simple fetch logic
+    let url = `${prefix}/${currentTab}/${id}`;
+    
+    try {
+        const res = await fetch(url);
+        if(!res.ok) throw new Error("Failed");
+        const data = await res.json();
+        showModal('Edit Record', getFormHtml(data));
+    } catch(e) {
+        alert("Error fetching record details");
+    }
+}
+
+function showModal(title, html) {
+    document.getElementById('modal-title').textContent = title;
+    document.getElementById('modal-form').innerHTML = html;
     document.getElementById('recordModal').classList.add('active');
 }
 
-function closeModal() {
-    document.getElementById('recordModal').classList.remove('active');
-}
+function closeModal() { document.getElementById('recordModal').classList.remove('active'); }
 
-// CRUD Operations - Flights
-async function editFlight(flightId) {
-    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
-    try {
-        const response = await fetch(`${prefix}/flights/${flightId}`);
-        const flight = await response.json();
-        
-        currentMode = 'edit';
-        currentRecordId = flightId;
-        document.getElementById('modal-title').textContent = `Edit Flight ${flightId}`;
-        
-        const formHtml = getFormHtml('flight', flight);
-        document.getElementById('modal-form').innerHTML = formHtml;
-        document.getElementById('recordModal').classList.add('active');
-    } catch (error) {
-        showMessage('flights', 'Error loading flight data', 'error');
-    }
-}
-
-async function deleteFlight(flightId) {
-    if (!confirm(`Are you sure you want to delete flight ${flightId}?`)) return;
-    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
-    
-    try {
-        const response = await fetch(`${prefix}/flights/${flightId}`, {
-            method: 'DELETE'
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok) {
-            showMessage('flights', result.message, 'success');
-            loadData();
-        } else {
-            showMessage('flights', result.error, 'error');
-        }
-    } catch (error) {
-        showMessage('flights', 'Error deleting flight', 'error');
-    }
-}
-
-// CRUD Operations - Bookings
-async function editBooking(ticketNo) {
-    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
-    try {
-        const response = await fetch(`${prefix}/bookings/${ticketNo}`);
-        const booking = await response.json();
-        
-        currentMode = 'edit';
-        currentRecordId = ticketNo;
-        document.getElementById('modal-title').textContent = `Edit Booking ${ticketNo}`;
-        
-        const formHtml = getFormHtml('booking', booking);
-        document.getElementById('modal-form').innerHTML = formHtml;
-        document.getElementById('recordModal').classList.add('active');
-    } catch (error) {
-        showMessage('bookings', 'Error loading booking data', 'error');
-    }
-}
-
-async function deleteBooking(ticketNo) {
-    if (!confirm(`Are you sure you want to delete booking ${ticketNo}?`)) return;
-    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
-    
-    try {
-        const response = await fetch(`${prefix}/bookings/${ticketNo}`, {
-            method: 'DELETE'
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok) {
-            showMessage('bookings', result.message, 'success');
-            loadData();
-        } else {
-            showMessage('bookings', result.error, 'error');
-        }
-    } catch (error) {
-        showMessage('bookings', 'Error deleting booking', 'error');
-    }
-}
-
-// CRUD Operations - Aircraft
-async function editAircraft(aircraftCode) {
-    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
-    try {
-        const response = await fetch(`${prefix}/aircraft/${aircraftCode}`);
-        const aircraft = await response.json();
-        
-        currentMode = 'edit';
-        currentRecordId = aircraftCode;
-        document.getElementById('modal-title').textContent = `Edit Aircraft ${aircraftCode}`;
-        
-        const formHtml = getFormHtml('aircraft', aircraft);
-        document.getElementById('modal-form').innerHTML = formHtml;
-        document.getElementById('recordModal').classList.add('active');
-    } catch (error) {
-        showMessage('aircraft', 'Error loading aircraft data', 'error');
-    }
-}
-
-async function deleteAircraft(aircraftCode) {
-    if (!confirm(`Are you sure you want to delete aircraft ${aircraftCode}?`)) return;
-    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
-    
-    try {
-        const response = await fetch(`${prefix}/aircraft/${aircraftCode}`, {
-            method: 'DELETE'
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok) {
-            showMessage('aircraft', result.message, 'success');
-            loadData();
-        } else {
-            showMessage('aircraft', result.error, 'error');
-        }
-    } catch (error) {
-        showMessage('aircraft', 'Error deleting aircraft', 'error');
-    }
-}
-
-// NEW: CRUD Operations - Airports
-async function editAirport(code) {
-    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
-    try {
-        const response = await fetch(`${prefix}/airports/${code}`);
-        const airport = await response.json();
-        
-        currentMode = 'edit';
-        currentRecordId = code;
-        document.getElementById('modal-title').textContent = `Edit Airport ${code}`;
-        
-        const formHtml = getFormHtml('airport', airport);
-        document.getElementById('modal-form').innerHTML = formHtml;
-        document.getElementById('recordModal').classList.add('active');
-    } catch (error) {
-        showMessage('airports', 'Error loading airport data', 'error');
-    }
-}
-
-async function deleteAirport(code) {
-    if (!confirm(`Are you sure you want to delete airport ${code}?`)) return;
-    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
-    
-    try {
-        const response = await fetch(`${prefix}/airports/${code}`, {
-            method: 'DELETE'
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok) {
-            showMessage('airports', result.message, 'success');
-            loadData();
-        } else {
-            showMessage('airports', result.error, 'error');
-        }
-    } catch (error) {
-        showMessage('airports', 'Error deleting airport', 'error');
-    }
-}
-
-// Helper to inject version for concurrency control
-function getVersionInput(data) {
-    // Only add version if it exists in the data (NoSQL mode)
-    return (data && data.version !== undefined) ? `<input type="hidden" name="version" value="${data.version}">` : '';
-}
-
-// Form submission
-async function submitForm(type) {
+// GENERIC SUBMIT
+async function submitForm() {
     const formData = new FormData(document.getElementById('record-form'));
     const data = Object.fromEntries(formData.entries());
     const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
     
-    // Convert contact_data to JSON if it's a booking
-    if (type === 'booking' && data.contact_email) {
-        data.contact_data = JSON.stringify({
-            email: data.contact_email,
-            phone: data.contact_phone || ''
-        });
-        delete data.contact_email;
-        delete data.contact_phone;
-    }
+    let url = `${prefix}/${currentTab}`;
+    let method = 'POST';
     
-    let endpointType = type;
-    if(type === 'flight') endpointType = 'flights';
-    if(type === 'booking') endpointType = 'bookings';
-    if(type === 'airport') endpointType = 'airports';
-
-    let url, method;
-    if (currentMode === 'create') {
-        url = `${prefix}/${endpointType}`;
-        method = 'POST';
-    } else {
-        url = `${prefix}/${endpointType}/${currentRecordId}`;
+    if (currentMode === 'edit') {
+        url += `/${currentRecordId}`;
         method = 'PUT';
     }
     
     try {
-        const response = await fetch(url, {
+        const res = await fetch(url, {
             method: method,
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(data)
         });
         
-        const result = await response.json();
-        
-        if (response.ok) {
-            showMessage(`${endpointType}`, result.message, 'success');
+        if (res.ok) {
             closeModal();
             loadData();
-        } else if (response.status === 409) {
-            // === NEW: Handle Concurrency Conflict ===
-            alert("⚠️ Update Failed: Data Conflict.\n\nAnother user has modified this record since you opened it.\n\nThe page will refresh to show the latest data.");
-            closeModal();
+            showMessage("Saved successfully", "success");
+        } else if (res.status === 409) {
+            alert("Conflict: Record modified by another user.");
             loadData();
         } else {
-            showMessage(`${endpointType}`, result.error, 'error');
+            alert("Error saving record");
         }
-    } catch (error) {
-        showMessage(`${endpointType}`, `Error saving ${type}`, 'error');
-    }
+    } catch(e) { console.error(e); }
 }
 
-// Form HTML generators
-function getFormHtml(type, data) {
-    if (type === 'flight') {
-        return getFlightForm(data);
-    } else if (type === 'booking') {
-        return getBookingForm(data);
-    } else if (type === 'aircraft') {
-        return getAircraftForm(data);
-    } else if (type === 'airport') {
-        return getAirportForm(data); // NEW
-    }
+async function deleteRecord(id) {
+    if(!confirm("Are you sure?")) return;
+    const prefix = crudUseNoSQL ? '/api/nosql' : '/api';
+    try {
+        const res = await fetch(`${prefix}/${currentTab}/${id}`, { method: 'DELETE' });
+        if(res.ok) { loadData(); showMessage("Deleted", "success"); }
+        else alert("Failed to delete");
+    } catch(e) { console.error(e); }
 }
 
-function getFlightForm(flight) {
-    return `
-        <form id="record-form" onsubmit="event.preventDefault(); submitForm('flight');">
-            ${getVersionInput(flight)} <div class="form-group">
-                <label>Flight Number *</label>
-                <input type="text" name="flight_no" value="${flight?.flight_no || ''}" required>
+// FORM GENERATORS (Matching Schema)
+function getFormHtml(d) {
+    const v = (val) => val !== undefined && val !== null ? val : '';
+    const ver = d.version ? `<input type="hidden" name="version" value="${d.version}">` : '';
+    // Primary keys should be read-only in 'edit' mode to prevent breaking the ID reference
+    const ro = currentMode === 'edit' ? 'readonly' : ''; 
+
+    // --- 1. FLIGHTS ---
+    if (currentTab === 'flights') return `
+        <form id="record-form" onsubmit="event.preventDefault(); submitForm()">
+            ${ver}
+            <div class="form-group"><label>ID (Auto)</label><input name="flight_id" value="${v(d.flight_id)}" readonly placeholder="Auto-generated"></div>
+            <div class="row">
+                <div class="col"><div class="form-group"><label>Flight No</label><input name="flight_no" value="${v(d.flight_no)}" required></div></div>
+                <div class="col"><div class="form-group"><label>Aircraft</label><input name="aircraft_code" value="${v(d.aircraft_code)}" maxlength="3" required></div></div>
             </div>
-            <div class="form-group">
-                <label>Departure Airport *</label>
-                <input type="text" name="departure_airport" value="${flight?.departure_airport || ''}" required maxlength="3">
+            <div class="row">
+                <div class="col"><div class="form-group"><label>Dep Airport</label><input name="departure_airport" value="${v(d.departure_airport)}" maxlength="3" required></div></div>
+                <div class="col"><div class="form-group"><label>Arr Airport</label><input name="arrival_airport" value="${v(d.arrival_airport)}" maxlength="3" required></div></div>
             </div>
-            <div class="form-group">
-                <label>Arrival Airport *</label>
-                <input type="text" name="arrival_airport" value="${flight?.arrival_airport || ''}" required maxlength="3">
+            <div class="row">
+                <div class="col"><div class="form-group"><label>Sched Dep</label><input type="datetime-local" name="scheduled_departure" value="${v(d.scheduled_departure)}" required></div></div>
+                <div class="col"><div class="form-group"><label>Sched Arr</label><input type="datetime-local" name="scheduled_arrival" value="${v(d.scheduled_arrival)}" required></div></div>
             </div>
-            <div class="form-group">
-                <label>Scheduled Departure *</label>
-                <input type="datetime-local" name="scheduled_departure" value="${formatDateTimeLocal(flight?.scheduled_departure)}" required>
+             <div class="row">
+                <div class="col"><div class="form-group"><label>Act Dep</label><input type="datetime-local" name="actual_departure" value="${v(d.actual_departure)}"></div></div>
+                <div class="col"><div class="form-group"><label>Act Arr</label><input type="datetime-local" name="actual_arrival" value="${v(d.actual_arrival)}"></div></div>
             </div>
-            <div class="form-group">
-                <label>Scheduled Arrival *</label>
-                <input type="datetime-local" name="scheduled_arrival" value="${formatDateTimeLocal(flight?.scheduled_arrival)}" required>
-            </div>
-            <div class="form-group">
-                <label>Status</label>
+            <div class="form-group"><label>Status</label>
                 <select name="status">
-                    <option value="Scheduled" ${flight?.status === 'Scheduled' ? 'selected' : ''}>Scheduled</option>
-                    <option value="On Time" ${flight?.status === 'On Time' ? 'selected' : ''}>On Time</option>
-                    <option value="Delayed" ${flight?.status === 'Delayed' ? 'selected' : ''}>Delayed</option>
-                    <option value="Departed" ${flight?.status === 'Departed' ? 'selected' : ''}>Departed</option>
-                    <option value="Arrived" ${flight?.status === 'Arrived' ? 'selected' : ''}>Arrived</option>
-                    <option value="Cancelled" ${flight?.status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
+                    <option value="Scheduled" ${d.status==='Scheduled'?'selected':''}>Scheduled</option>
+                    <option value="On Time" ${d.status==='On Time'?'selected':''}>On Time</option>
+                    <option value="Delayed" ${d.status==='Delayed'?'selected':''}>Delayed</option>
+                    <option value="Departed" ${d.status==='Departed'?'selected':''}>Departed</option>
+                    <option value="Arrived" ${d.status==='Arrived'?'selected':''}>Arrived</option>
+                    <option value="Cancelled" ${d.status==='Cancelled'?'selected':''}>Cancelled</option>
                 </select>
             </div>
-            <div class="form-group">
-                <label>Aircraft Code *</label>
-                <input type="text" name="aircraft_code" value="${flight?.aircraft_code || ''}" required maxlength="3">
+            <div class="form-actions"><button class="btn btn-primary">Save</button></div>
+        </form>`;
+
+    // --- 2. AIRPORTS ---
+    if (currentTab === 'airports') return `
+        <form id="record-form" onsubmit="event.preventDefault(); submitForm()">
+            ${ver}
+            <div class="form-group"><label>Code</label><input name="airport_code" value="${v(d.airport_code)}" ${ro} maxlength="3" required></div>
+            <div class="form-group"><label>Name</label><input name="airport_name" value="${v(d.airport_name)}" required></div>
+            <div class="form-group"><label>City</label><input name="city" value="${v(d.city)}" required></div>
+            <div class="form-group"><label>Coordinates</label><input name="coordinates" value="${v(d.coordinates)}" placeholder="(lon, lat)"></div>
+            <div class="form-group"><label>Timezone</label><input name="timezone" value="${v(d.timezone)}"></div>
+            <div class="form-actions"><button class="btn btn-primary">Save</button></div>
+        </form>`;
+
+    // --- 3. AIRCRAFT ---
+    if (currentTab === 'aircraft') return `
+        <form id="record-form" onsubmit="event.preventDefault(); submitForm()">
+            ${ver}
+            <div class="form-group"><label>Code</label><input name="aircraft_code" value="${v(d.aircraft_code)}" ${ro} maxlength="3" required></div>
+            <div class="form-group"><label>Model</label><input name="model" value="${v(d.model)}" required></div>
+            <div class="form-group"><label>Range</label><input type="number" name="range" value="${v(d.range)}" required></div>
+            <div class="form-actions"><button class="btn btn-primary">Save</button></div>
+        </form>`;
+
+    // --- 4. BOOKINGS ---
+    if (currentTab === 'bookings') return `
+        <form id="record-form" onsubmit="event.preventDefault(); submitForm()">
+            ${ver}
+            <div class="form-group"><label>Book Ref</label><input name="book_ref" value="${v(d.book_ref)}" ${ro} maxlength="6" required></div>
+            <div class="form-group"><label>Date</label><input type="datetime-local" name="book_date" value="${v(d.book_date)}" required></div>
+            <div class="form-group"><label>Amount</label><input type="number" name="total_amount" value="${v(d.total_amount)}" required></div>
+            <div class="form-actions"><button class="btn btn-primary">Save</button></div>
+        </form>`;
+
+    // --- 5. TICKETS ---
+    if (currentTab === 'tickets') return `
+        <form id="record-form" onsubmit="event.preventDefault(); submitForm()">
+            ${ver}
+            <div class="form-group"><label>Ticket No</label><input name="ticket_no" value="${v(d.ticket_no)}" ${ro} required></div>
+            <div class="form-group"><label>Book Ref</label><input name="book_ref" value="${v(d.book_ref)}" required></div>
+            <div class="form-group"><label>Passenger ID</label><input name="passenger_id" value="${v(d.passenger_id)}" required></div>
+            <div class="form-actions"><button class="btn btn-primary">Save</button></div>
+        </form>`;
+
+    // --- 6. TICKET FLIGHTS ---
+    if (currentTab === 'ticket_flights') return `
+        <form id="record-form" onsubmit="event.preventDefault(); submitForm()">
+            ${ver}
+            <div class="form-group"><label>Ticket No</label><input name="ticket_no" value="${v(d.ticket_no)}" ${ro} required></div>
+            <div class="form-group"><label>Flight ID</label><input name="flight_id" value="${v(d.flight_id)}" ${ro} required></div>
+            <div class="form-group"><label>Fare Conditions</label>
+                <select name="fare_conditions">
+                    <option value="Economy" ${d.fare_conditions==='Economy'?'selected':''}>Economy</option>
+                    <option value="Business" ${d.fare_conditions==='Business'?'selected':''}>Business</option>
+                    <option value="Comfort" ${d.fare_conditions==='Comfort'?'selected':''}>Comfort</option>
+                </select>
             </div>
-            <div class="form-group">
-                <label>Actual Departure</label>
-                <input type="datetime-local" name="actual_departure" value="${formatDateTimeLocal(flight?.actual_departure)}">
+            <div class="form-group"><label>Amount</label><input type="number" name="amount" value="${v(d.amount)}" required></div>
+            <div class="form-actions"><button class="btn btn-primary">Save</button></div>
+        </form>`;
+
+    // --- 7. SEATS ---
+    if (currentTab === 'seats') return `
+        <form id="record-form" onsubmit="event.preventDefault(); submitForm()">
+            ${ver}
+            <div class="form-group"><label>Aircraft Code</label><input name="aircraft_code" value="${v(d.aircraft_code)}" ${ro} required></div>
+            <div class="form-group"><label>Seat No</label><input name="seat_no" value="${v(d.seat_no)}" ${ro} required></div>
+            <div class="form-group"><label>Fare Conditions</label>
+                <select name="fare_conditions">
+                    <option value="Economy" ${d.fare_conditions==='Economy'?'selected':''}>Economy</option>
+                    <option value="Business" ${d.fare_conditions==='Business'?'selected':''}>Business</option>
+                    <option value="Comfort" ${d.fare_conditions==='Comfort'?'selected':''}>Comfort</option>
+                </select>
             </div>
-            <div class="form-group">
-                <label>Actual Arrival</label>
-                <input type="datetime-local" name="actual_arrival" value="${formatDateTimeLocal(flight?.actual_arrival)}">
-            </div>
-            <div class="form-actions">
-                <button type="button" class="btn" onclick="closeModal()">Cancel</button>
-                <button type="submit" class="btn btn-primary">${currentMode === 'create' ? 'Create' : 'Update'}</button>
-            </div>
-        </form>
-    `;
+            <div class="form-actions"><button class="btn btn-primary">Save</button></div>
+        </form>`;
+
+    // --- 8. BOARDING PASSES  ---
+    if (currentTab === 'boarding_passes') return `
+        <form id="record-form" onsubmit="event.preventDefault(); submitForm()">
+            ${ver}
+            <div class="form-group"><label>Ticket No</label><input name="ticket_no" value="${v(d.ticket_no)}" ${ro} required></div>
+            <div class="form-group"><label>Flight ID</label><input name="flight_id" value="${v(d.flight_id)}" ${ro} required></div>
+            <div class="form-group"><label>Boarding No</label><input type="number" name="boarding_no" value="${v(d.boarding_no)}" required></div>
+            <div class="form-group"><label>Seat No</label><input name="seat_no" value="${v(d.seat_no)}" required></div>
+            <div class="form-actions"><button class="btn btn-primary">Save</button></div>
+        </form>`;
+
+    return `<div style="padding:20px;">Form not implemented for this table yet.</div>`;
 }
 
-function getBookingForm(booking) {
-    return `
-        <form id="record-form" onsubmit="event.preventDefault(); submitForm('booking');">
-            ${getVersionInput(booking)}
-            ${currentMode === 'create' ? `
-            <div class="form-group">
-                <label>Ticket Number *</label>
-                <input type="text" name="ticket_no" value="${booking?.ticket_no || ''}" required>
-            </div>
-            <div class="form-group">
-                <label>Book Reference *</label>
-                <input type="text" name="book_ref" value="${booking?.book_ref || ''}" required>
-            </div>
-            ` : ''}
-            <div class="form-group">
-                <label>Passenger ID *</label>
-                <input type="text" name="passenger_id" value="${booking?.passenger_id || ''}" required>
-            </div>
-            <div class="form-actions">
-                <button type="button" class="btn" onclick="closeModal()">Cancel</button>
-                <button type="submit" class="btn btn-primary">${currentMode === 'create' ? 'Create' : 'Update'}</button>
-            </div>
-        </form>
-    `;
-}
-
-function getAircraftForm(aircraft) {
-    return `
-        <form id="record-form" onsubmit="event.preventDefault(); submitForm('aircraft');">
-            ${getVersionInput(aircraft)} ${currentMode === 'create' ? `
-            <div class="form-group">
-                <label>Aircraft Code *</label>
-                <input type="text" name="aircraft_code" value="${aircraft?.aircraft_code || ''}" required maxlength="3">
-            </div>
-            ` : ''}
-            <div class="form-group">
-                <label>Model *</label>
-                <input type="text" name="model" value="${aircraft?.model || ''}" required>
-            </div>
-            <div class="form-group">
-                <label>Range (km) *</label>
-                <input type="number" name="range" value="${aircraft?.range || ''}" required min="0">
-            </div>
-            <div class="form-actions">
-                <button type="button" class="btn" onclick="closeModal()">Cancel</button>
-                <button type="submit" class="btn btn-primary">${currentMode === 'create' ? 'Create' : 'Update'}</button>
-            </div>
-        </form>
-    `;
-}
-
-
-function getAirportForm(airport) {
-    return `
-        <form id="record-form" onsubmit="event.preventDefault(); submitForm('airport');">
-            ${getVersionInput(airport)} ${currentMode === 'create' ? `
-            <div class="form-group">
-                <label>Airport Code *</label>
-                <input type="text" name="airport_code" value="${airport?.airport_code || ''}" required maxlength="3" style="text-transform:uppercase">
-            </div>
-            ` : ''}
-            <div class="form-group">
-                <label>Airport Name *</label>
-                <input type="text" name="airport_name" value="${airport?.airport_name || ''}" required>
-            </div>
-            <div class="form-group">
-                <label>City *</label>
-                <input type="text" name="city" value="${airport?.city || ''}" required>
-            </div>
-            <div class="form-group">
-                <label>Timezone</label>
-                <input type="text" name="timezone" value="${airport?.timezone || ''}">
-            </div>
-            <div class="form-group">
-                <label>Coordinates</label>
-                <input type="text" name="coordinates" value="${airport?.coordinates || ''}">
-            </div>
-            <div class="form-actions">
-                <button type="button" class="btn" onclick="closeModal()">Cancel</button>
-                <button type="submit" class="btn btn-primary">${currentMode === 'create' ? 'Create' : 'Update'}</button>
-            </div>
-        </form>
-    `;
-}
-
-// Utility functions
-function showMessage(section, message, type) {
-    const messageDiv = document.getElementById(`${section}-message`);
-    if(messageDiv) {
-        messageDiv.innerHTML = `<div class="${type}-message">${message}</div>`;
-        setTimeout(() => {
-            messageDiv.innerHTML = '';
-        }, 5000);
-    }
-}
-
-function formatDateTime(datetime) {
-    if (!datetime) return '-';
-    return new Date(datetime).toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
-}
-
-function formatDateTimeLocal(datetime) {
-    if (!datetime) return '';
-    const date = new Date(datetime);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
-function formatContact(contactData) {
-    try {
-        const contact = typeof contactData === 'string' ? JSON.parse(contactData) : contactData;
-        return contact.email || contact.phone || '-';
-    } catch {
-        return '-';
-    }
-}
-
-function getStatusBadge(status) {
-    if (status === 'Arrived' || status === 'On Time') return 'success';
-    if (status === 'Delayed') return 'warning';
-    if (status === 'Cancelled') return 'danger';
-    return 'info';
-}
-
-function capitalizeFirst(str) {
-    return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', function() {
-    // 1. Restore Checkbox
-    const toggle = document.getElementById('crudToggle');
-    if (toggle) {
-        toggle.checked = crudUseNoSQL;
-        updateCrudUI();
-    }
-
-    // 2. Restore Active Tab UI
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-    
-    const activeBtn = document.querySelector(`button[onclick="switchTab('${currentTab}')"]`);
-    if(activeBtn) activeBtn.classList.add('active');
-    
-    const activeContent = document.getElementById(`${currentTab}-tab`);
-    if(activeContent) activeContent.classList.add('active');
-
-    // 3. Load Data
-    loadData();
-});
+// UTILS
+function showMessage(msg) { const d=document.getElementById(`${currentTab}-message`); if(d){d.textContent=msg; setTimeout(()=>d.textContent='', 3000);} }
+function formatDate(d) { if(!d) return ''; return new Date(d).toLocaleString(); }
+function startPolling() { pollingInterval = setInterval(loadData, 5000); }
+function stopPolling() { clearInterval(pollingInterval); }

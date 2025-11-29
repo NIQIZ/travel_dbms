@@ -3,363 +3,55 @@
 {% block head %}
 <title>Database Management</title>
 <style>
-    .manage-container {
-        padding: 40px 20px;
-        max-width: 1400px;
-        margin: 0 auto;
-    }
+    .manage-container { padding: 40px 20px; max-width: 1400px; margin: 0 auto; }
+    .manage-header { text-align: center; margin-bottom: 40px; }
+    .manage-header h1 { color: #667eea; margin-bottom: 10px; }
     
-    .manage-header {
-        text-align: center;
-        margin-bottom: 40px;
-    }
-    
-    .manage-header h1 {
-        color: #667eea;
-        margin-bottom: 10px;
-        transition: color 0.3s ease;
-    }
-    
+    /* Scrollable Tab Container for many tabs */
     .tab-buttons {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 30px;
-        border-bottom: 2px solid #e0e0e0;
+        display: flex; gap: 5px; margin-bottom: 30px; border-bottom: 2px solid #e0e0e0;
+        overflow-x: auto; padding-bottom: 5px;
     }
     
     .tab-btn {
-        padding: 12px 24px;
-        background: white;
-        border: none;
-        border-bottom: 3px solid transparent;
-        cursor: pointer;
-        font-size: 16px;
-        font-weight: 500;
-        color: #666;
-        transition: all 0.3s;
+        padding: 10px 15px; background: white; border: none; border-bottom: 3px solid transparent;
+        cursor: pointer; font-size: 14px; font-weight: 500; color: #666; white-space: nowrap;
     }
+    .tab-btn:hover { color: #667eea; background: #f5f7ff; }
+    .tab-btn.active { color: #667eea; border-bottom-color: #667eea; }
     
-    .tab-btn:hover {
-        color: #667eea;
-        background: #f5f7ff;
-    }
+    .tab-content { display: none; animation: fadeIn 0.3s; }
+    .tab-content.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     
-    .tab-btn.active {
-        color: #667eea;
-        border-bottom-color: #667eea;
-    }
+    .controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 15px; flex-wrap: wrap; }
+    .search-box { display: flex; gap: 10px; flex: 1; max-width: 500px; }
+    .search-box input { flex: 1; padding: 10px 15px; border: 2px solid #e0e0e0; border-radius: 6px; }
     
-    .tab-content {
-        display: none;
-        animation: fadeIn 0.3s;
-    }
+    .btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; color: white; }
+    .btn-primary { background: #667eea; }
+    .btn-success { background: #4CAF50; }
+    .btn-warning { background: #FF9800; }
+    .btn-danger { background: #f44336; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
     
-    .tab-content.active {
-        display: block;
-    }
+    .data-table { width: 100%; background: white; border-radius: 8px; overflow-x: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .data-table table { width: 100%; border-collapse: collapse; min-width: 800px; }
+    .data-table th, .data-table td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #e0e0e0; }
+    .data-table th { background: #667eea; color: white; text-transform: uppercase; font-size: 12px; }
     
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
+    .pagination { display: flex; justify-content: center; gap: 10px; margin-top: 20px; }
+    .pagination button { padding: 8px 12px; background: white; border: 1px solid #ddd; cursor: pointer; }
     
-    .controls {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 20px;
-        gap: 15px;
-        flex-wrap: wrap;
-    }
-    
-    .search-box {
-        display: flex;
-        gap: 10px;
-        flex: 1;
-        max-width: 400px;
-    }
-    
-    .search-box input {
-        flex: 1;
-        padding: 10px 15px;
-        border: 2px solid #e0e0e0;
-        border-radius: 6px;
-        font-size: 14px;
-    }
-    
-    .search-box input:focus {
-        outline: none;
-        border-color: #667eea;
-    }
-    
-    .btn {
-        padding: 10px 20px;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 14px;
-        font-weight: 500;
-        transition: all 0.3s;
-    }
-    
-    .btn-primary {
-        background: #667eea;
-        color: white;
-    }
-    
-    .btn-primary:hover {
-        background: #5568d3;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-    }
-    
-    .btn-success {
-        background: #4CAF50;
-        color: white;
-    }
-    
-    .btn-warning {
-        background: #FF9800;
-        color: white;
-    }
-    
-    .btn-danger {
-        background: #f44336;
-        color: white;
-    }
-    
-    .btn-sm {
-        padding: 6px 12px;
-        font-size: 12px;
-    }
-    
-    .data-table {
-        width: 100%;
-        background: white;
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-    
-    .data-table table {
-        width: 100%;
-        border-collapse: collapse;
-    }
-    
-    .data-table thead {
-        background: #667eea;
-        color: white;
-    }
-    
-    .data-table th,
-    .data-table td {
-        padding: 12px 15px;
-        text-align: left;
-        border-bottom: 1px solid #e0e0e0;
-    }
-    
-    .data-table th {
-        font-weight: 600;
-        text-transform: uppercase;
-        font-size: 12px;
-        letter-spacing: 0.5px;
-    }
-    
-    .data-table tbody tr:hover {
-        background: #f5f7ff;
-    }
-    
-    .data-table td {
-        font-size: 14px;
-    }
-    
-    .action-buttons {
-        display: flex;
-        gap: 5px;
-    }
-    
-    .pagination {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 10px;
-        margin-top: 20px;
-        padding: 20px;
-    }
-    
-    .pagination button {
-        padding: 8px 12px;
-        border: 1px solid #e0e0e0;
-        background: white;
-        cursor: pointer;
-        border-radius: 4px;
-    }
-    
-    .pagination button:hover:not(:disabled) {
-        background: #667eea;
-        color: white;
-        border-color: #667eea;
-    }
-    
-    .pagination button:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-    
-    .pagination span {
-        font-size: 14px;
-        color: #666;
-    }
-    
-    /* Modal Styles */
-    .modal {
-        display: none;
-        position: fixed;
-        z-index: 1000;
-        left: 0;
-        top: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.5);
-        animation: fadeIn 0.3s;
-    }
-    
-    .modal.active {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-    }
-    
-    .modal-content {
-        background: white;
-        padding: 30px;
-        border-radius: 12px;
-        max-width: 600px;
-        width: 90%;
-        max-height: 80vh;
-        overflow-y: auto;
-        animation: slideUp 0.3s;
-    }
-    
-    @keyframes slideUp {
-        from { transform: translateY(50px); opacity: 0; }
-        to { transform: translateY(0); opacity: 1; }
-    }
-    
-    .modal-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 20px;
-        padding-bottom: 15px;
-        border-bottom: 2px solid #e0e0e0;
-    }
-    
-    .modal-header h2 {
-        color: #667eea;
-        margin: 0;
-    }
-    
-    .close {
-        font-size: 28px;
-        cursor: pointer;
-        color: #999;
-    }
-    
-    .close:hover {
-        color: #f44336;
-    }
-    
-    .form-group {
-        margin-bottom: 20px;
-    }
-    
-    .form-group label {
-        display: block;
-        margin-bottom: 8px;
-        font-weight: 500;
-        color: #333;
-    }
-    
-    .form-group input,
-    .form-group select,
-    .form-group textarea {
-        width: 100%;
-        padding: 10px 15px;
-        border: 2px solid #e0e0e0;
-        border-radius: 6px;
-        font-size: 14px;
-        font-family: inherit;
-    }
-    
-    .form-group input:focus,
-    .form-group select:focus,
-    .form-group textarea:focus {
-        outline: none;
-        border-color: #667eea;
-    }
-    
-    .form-actions {
-        display: flex;
-        gap: 10px;
-        justify-content: flex-end;
-        margin-top: 25px;
-        padding-top: 20px;
-        border-top: 2px solid #e0e0e0;
-    }
-    
-    .loading {
-        text-align: center;
-        padding: 40px;
-        color: #999;
-    }
-    
-    .error-message {
-        background: #ffebee;
-        color: #c62828;
-        padding: 12px 20px;
-        border-radius: 6px;
-        margin-bottom: 20px;
-        border-left: 4px solid #c62828;
-    }
-    
-    .success-message {
-        background: #e8f5e9;
-        color: #2e7d32;
-        padding: 12px 20px;
-        border-radius: 6px;
-        margin-bottom: 20px;
-        border-left: 4px solid #2e7d32;
-    }
-    
-    .badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 12px;
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-    }
-    
-    .badge-success {
-        background: #e8f5e9;
-        color: #2e7d32;
-    }
-    
-    .badge-warning {
-        background: #fff3e0;
-        color: #f57c00;
-    }
-    
-    .badge-danger {
-        background: #ffebee;
-        color: #c62828;
-    }
-    
-    .badge-info {
-        background: #e3f2fd;
-        color: #1976d2;
-    }
+    /* Modal */
+    .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+    .modal.active { display: flex; justify-content: center; align-items: center; }
+    .modal-content { background: white; padding: 30px; border-radius: 12px; width: 500px; max-height: 90vh; overflow-y: auto; }
+    .form-group { margin-bottom: 15px; }
+    .form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
+    .form-group input, .form-group select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+    .form-actions { margin-top: 20px; text-align: right; }
+    .form-actions button { margin-left: 10px; }
 </style>
 {% endblock %}
 
@@ -367,7 +59,6 @@
 <div class="manage-container">
     <div class="manage-header">
         <h1 id="page-title">Database Management</h1>
-        
         <div class="db-toggle-container">
             <span class="toggle-label" id="crud-label-sql" style="color: #2196F3;">SQL</span>
             <label class="switch">
@@ -376,181 +67,181 @@
             </label>
             <span class="toggle-label" id="crud-label-nosql" style="color: #aaa;">NoSQL</span>
         </div>
-
-        <p>Create, Read, Update, and Delete records from your travel database</p>
     </div>
     
     <div class="tab-buttons">
-        <button class="tab-btn active" onclick="switchTab('flights')">
-            ✈️ Flights
-        </button>
-        <button class="tab-btn" onclick="switchTab('bookings')">
-            🎫 Bookings
-        </button>
-        <button class="tab-btn" onclick="switchTab('aircraft')">
-            🛫 Aircraft
-        </button>
-        <button class="tab-btn" onclick="switchTab('airports')">
-            🏢 Airports
-        </button>
+        <button class="tab-btn active" onclick="switchTab('flights')">✈️ Flights</button>
+        <button class="tab-btn" onclick="switchTab('aircraft')">🛩️ Aircraft</button>
+        <button class="tab-btn" onclick="switchTab('airports')">🏢 Airports</button>
+        <button class="tab-btn" onclick="switchTab('bookings')">📖 Bookings</button>
+        <button class="tab-btn" onclick="switchTab('tickets')">🎫 Tickets</button>
+        <button class="tab-btn" onclick="switchTab('ticket_flights')">🔗 Ticket Flights</button>
+        <button class="tab-btn" onclick="switchTab('seats')">💺 Seats</button>
+        <button class="tab-btn" onclick="switchTab('boarding_passes')">🛂 Boarding Passes</button>
     </div>
     
     <div id="flights-tab" class="tab-content active">
         <div class="controls">
             <div class="search-box">
-                <select id="flights-search-col" class="form-select" style="max-width: 180px; border: 2px solid #e0e0e0;">
-                    <option value="flight_id">Flight ID</option>
+                <select id="flights-search-col" class="form-select">
                     <option value="flight_no">Flight No</option>
-                    <option value="route">Route</option>
-                    <option value="scheduled_departure">Scheduled Departure</option>
                     <option value="status">Status</option>
-                    <option value="aircraft_code">Aircraft</option>
                 </select>
                 <input type="text" id="flights-search" placeholder="Search flights...">
-                <button class="btn btn-primary" onclick="searchFlights()">Search</button>
+                <button class="btn btn-primary" onclick="searchData('flights')">Search</button>
             </div>
-            <button class="btn btn-success" onclick="openCreateModal('flight')">
-                ➕ Add New Flight
-            </button>
+            <button class="btn btn-success" onclick="openCreateModal('flight')">➕ New Flight</button>
         </div>
-        
         <div id="flights-message"></div>
-        
         <div class="data-table">
             <table>
-                <thead>
-                    <tr>
-                        <th>Flight ID</th>
-                        <th>Flight No</th>
-                        <th>Route</th>
-                        <th>Scheduled Departure</th>
-                        <th>Status</th>
-                        <th>Aircraft</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="flights-tbody">
-                    <tr><td colspan="7" class="loading">Loading...</td></tr>
-                </tbody>
+                <thead><tr><th>ID</th><th>No</th><th>Dep</th><th>Arr</th><th>Sched. Dep</th><th>Sched. Arr</th><th>Status</th><th>Aircraft</th><th>Act. Dep</th><th>Act. Arr</th><th>Actions</th></tr></thead>
+                <tbody id="flights-tbody"><tr><td colspan="7">Loading...</td></tr></tbody>
             </table>
         </div>
-        
         <div class="pagination" id="flights-pagination"></div>
     </div>
-    
-    <div id="bookings-tab" class="tab-content">
-        <div class="controls">
-            <div class="search-box">
-                <select id="bookings-search-col" class="form-select" style="max-width: 180px; border: 2px solid #e0e0e0;">
-                    <option value="ticket_no">Ticket No</option>
-                    <option value="book_ref">Book Ref</option>
-                    <option value="passenger_id">Passenger ID</option>
-                </select>
-                <input type="text" id="bookings-search" placeholder="Search bookings...">
-                <button class="btn btn-primary" onclick="searchBookings()">Search</button>
-            </div>
-            </div>
 
-        <div class="data-table">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Ticket No</th>
-                        <th>Book Ref</th>
-                        <th>Passenger ID</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="bookings-tbody">
-                    <tr><td colspan="4" class="loading">Loading...</td></tr>
-                </tbody>
-            </table>
-        </div>
-        
-        <div class="pagination" id="bookings-pagination"></div>
-    </div>
-    
     <div id="aircraft-tab" class="tab-content">
         <div class="controls">
             <div class="search-box">
-                <select id="aircraft-search-col" class="form-select" style="max-width: 180px; border: 2px solid #e0e0e0;">
-                    <option value="aircraft_code">Aircraft Code</option>
-                    <option value="model">Model</option>
-                    <option value="range">Range (km)</option>
-                </select>
-                <input type="text" id="aircraft-search" placeholder="Search aircraft...">
-                <button class="btn btn-primary" onclick="searchAircraft()">Search</button>
+                <input type="text" id="aircraft-search" placeholder="Search aircraft code...">
+                <button class="btn btn-primary" onclick="searchData('aircraft')">Search</button>
             </div>
-            <button class="btn btn-success" onclick="openCreateModal('aircraft')">
-                ➕ Add New Aircraft
-            </button>
+            <button class="btn btn-success" onclick="openCreateModal('aircraft')">➕ New Aircraft</button>
         </div>
-        
         <div id="aircraft-message"></div>
-        
         <div class="data-table">
             <table>
-                <thead>
-                    <tr>
-                        <th>Aircraft Code</th>
-                        <th>Model</th>
-                        <th>Range (km)</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="aircraft-tbody">
-                    <tr><td colspan="4" class="loading">Loading...</td></tr>
-                </tbody>
+                <thead><tr><th>Code</th><th>Model</th><th>Range</th><th>Actions</th></tr></thead>
+                <tbody id="aircraft-tbody"></tbody>
             </table>
         </div>
-        
         <div class="pagination" id="aircraft-pagination"></div>
     </div>
 
     <div id="airports-tab" class="tab-content">
         <div class="controls">
             <div class="search-box">
-                <select id="airports-search-col" class="form-select" style="max-width: 180px; border: 2px solid #e0e0e0;">
-                    <option value="airport_code">Code</option>
-                    <option value="airport_name">Airport Name</option>
-                    <option value="city">City</option>
-                    <option value="timezone">Timezone</option>
-                </select>
-                <input type="text" id="airports-search" placeholder="Search airports...">
-                <button class="btn btn-primary" onclick="searchAirports()">Search</button>
+                <input type="text" id="airports-search" placeholder="Search airport code...">
+                <button class="btn btn-primary" onclick="searchData('airports')">Search</button>
             </div>
-            <button class="btn btn-success" onclick="openCreateModal('airport')">
-                ➕ Add New Airport
-            </button>
+            <button class="btn btn-success" onclick="openCreateModal('airport')">➕ New Airport</button>
         </div>
-        
         <div id="airports-message"></div>
-        
         <div class="data-table">
             <table>
-                <thead>
-                    <tr>
-                        <th>Code</th>
-                        <th>Airport Name</th>
-                        <th>City</th>
-                        <th>Timezone</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="airports-tbody">
-                    <tr><td colspan="5" class="loading">Loading...</td></tr>
-                </tbody>
+                <thead><tr><th>Code</th><th>Name</th><th>City</th><th>Coordinates</th><th>Timezone</th><th>Actions</th></tr></thead>
+                <tbody id="airports-tbody"></tbody>
             </table>
         </div>
-        
         <div class="pagination" id="airports-pagination"></div>
     </div>
+
+    <div id="bookings-tab" class="tab-content">
+        <div class="controls">
+            <div class="search-box">
+                <select id="bookings-search-col" class="form-select">
+                    <option value="book_ref">Book Ref</option>
+                </select>
+                <input type="text" id="bookings-search" placeholder="Search bookings...">
+                <button class="btn btn-primary" onclick="searchData('bookings')">Search</button>
+            </div>
+            <button class="btn btn-success" onclick="openCreateModal('booking')">➕ New Booking</button>
+        </div>
+        <div id="bookings-message"></div>
+        <div class="data-table">
+            <table>
+                <thead><tr><th>Book Ref</th><th>Book Date</th><th>Total Amount</th><th>Actions</th></tr></thead>
+                <tbody id="bookings-tbody"></tbody>
+            </table>
+        </div>
+        <div class="pagination" id="bookings-pagination"></div>
+    </div>
+
+    <div id="tickets-tab" class="tab-content">
+        <div class="controls">
+            <div class="search-box">
+                <select id="tickets-search-col" class="form-select">
+                    <option value="ticket_no">Ticket No</option>
+                    <option value="book_ref">Book Ref</option>
+                    <option value="passenger_id">Passenger ID</option>
+                </select>
+                <input type="text" id="tickets-search" placeholder="Search tickets...">
+                <button class="btn btn-primary" onclick="searchData('tickets')">Search</button>
+            </div>
+            <button class="btn btn-success" onclick="openCreateModal('ticket')">➕ New Ticket</button>
+        </div>
+        <div id="tickets-message"></div>
+        <div class="data-table">
+            <table>
+                <thead><tr><th>Ticket No</th><th>Book Ref</th><th>Passenger ID</th><th>Actions</th></tr></thead>
+                <tbody id="tickets-tbody"></tbody>
+            </table>
+        </div>
+        <div class="pagination" id="tickets-pagination"></div>
+    </div>
+
+    <div id="ticket_flights-tab" class="tab-content">
+        <div class="controls">
+            <div class="search-box">
+                <input type="text" id="ticket_flights-search" placeholder="Search Ticket No...">
+                <button class="btn btn-primary" onclick="searchData('ticket_flights')">Search</button>
+            </div>
+            <button class="btn btn-success" onclick="openCreateModal('ticket_flight')">➕ New Ticket Flight</button>
+        </div>
+        <div id="ticket_flights-message"></div>
+        <div class="data-table">
+            <table>
+                <thead><tr><th>Ticket No</th><th>Flight ID</th><th>Fare</th><th>Amount</th><th>Actions</th></tr></thead>
+                <tbody id="ticket_flights-tbody"></tbody>
+            </table>
+        </div>
+        <div class="pagination" id="ticket_flights-pagination"></div>
+    </div>
+
+    <div id="seats-tab" class="tab-content">
+        <div class="controls">
+            <div class="search-box">
+                <input type="text" id="seats-search" placeholder="Search Aircraft Code...">
+                <button class="btn btn-primary" onclick="searchData('seats')">Search</button>
+            </div>
+            <button class="btn btn-success" onclick="openCreateModal('seat')">➕ New Seat</button>
+        </div>
+        <div id="seats-message"></div>
+        <div class="data-table">
+            <table>
+                <thead><tr><th>Aircraft</th><th>Seat No</th><th>Fare Conditions</th><th>Actions</th></tr></thead>
+                <tbody id="seats-tbody"></tbody>
+            </table>
+        </div>
+        <div class="pagination" id="seats-pagination"></div>
+    </div>
+
+    <div id="boarding_passes-tab" class="tab-content">
+        <div class="controls">
+            <div class="search-box">
+                <input type="text" id="boarding_passes-search" placeholder="Search Ticket No...">
+                <button class="btn btn-primary" onclick="searchData('boarding_passes')">Search</button>
+            </div>
+            <button class="btn btn-success" onclick="openCreateModal('boarding_pass')">➕ New Boarding Pass</button>
+        </div>
+        <div id="boarding_passes-message"></div>
+        <div class="data-table">
+            <table>
+                <thead><tr><th>Ticket No</th><th>Flight ID</th><th>Boarding No</th><th>Seat No</th><th>Actions</th></tr></thead>
+                <tbody id="boarding_passes-tbody"></tbody>
+            </table>
+        </div>
+        <div class="pagination" id="boarding_passes-pagination"></div>
+    </div>
+
 </div>
 
 <div id="recordModal" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2 id="modal-title">Create Record</h2>
+            <h2 id="modal-title">Record</h2>
             <span class="close" onclick="closeModal()">&times;</span>
         </div>
         <div id="modal-form"></div>
