@@ -1364,6 +1364,28 @@ def nosql_get_aircraft_routes(aircraft_code):
 
 # --- NoSQL CRUD Endpoints ---
 
+@app.route('/api/nosql/flights/<id>', methods=['GET'])
+def get_nosql_flight_single(id):
+    try: query_id = int(id)
+    except: query_id = ObjectId(id)
+    
+    doc = mongo.db.flights.find_one({'_id': query_id})
+    if not doc: return jsonify({'error': 'Flight not found'}), 404
+    
+    return jsonify({
+        'flight_id': str(doc.get('_id')),
+        'flight_no': doc.get('flight_no'),
+        'scheduled_departure': doc.get('scheduled_departure'),
+        'scheduled_arrival': doc.get('scheduled_arrival'),
+        'departure_airport': doc.get('departure', {}).get('airport_code'),
+        'arrival_airport': doc.get('arrival', {}).get('airport_code'),
+        'status': doc.get('status'),
+        'aircraft_code': doc.get('aircraft', {}).get('code'),
+        'actual_departure': doc.get('actual_departure'),
+        'actual_arrival': doc.get('actual_arrival'),
+        'version': doc.get('version', 1)
+    })
+
 @app.route('/api/nosql/flights', methods=['GET'])
 def get_nosql_flights():
     page = int(request.args.get('page', 1))
@@ -1614,6 +1636,18 @@ def delete_nosql_booking(ticket_no):
         
     return jsonify({'message': 'Ticket deleted from booking'})
 
+@app.route('/api/nosql/aircraft/<id>', methods=['GET'])
+def get_nosql_aircraft_single(id):
+    doc = mongo.db.aircrafts.find_one({'_id': id})
+    if not doc: return jsonify({'error': 'Aircraft not found'}), 404
+    
+    return jsonify({
+        'aircraft_code': doc['_id'],
+        'model': doc.get('model', 'Unknown'),
+        'range': doc.get('range', 0),
+        'version': doc.get('version', 1)
+    })
+
 @app.route('/api/nosql/aircraft', methods=['GET'])
 def get_nosql_aircraft():
     page = int(request.args.get('page', 1))
@@ -1682,6 +1716,20 @@ def delete_nosql_aircraft(id):
         return jsonify({'error': 'Aircraft not found or already deleted'}), 404
         
     return jsonify({'message': 'Aircraft deleted'})
+
+@app.route('/api/nosql/airports/<id>', methods=['GET'])
+def get_nosql_airport_single(id):
+    doc = mongo.db.airports.find_one({'_id': id})
+    if not doc: return jsonify({'error': 'Airport not found'}), 404
+    
+    return jsonify({
+        'airport_code': doc['_id'],
+        'airport_name': doc.get('airport_name', 'Unknown'),
+        'city': doc.get('city', 'Unknown'),
+        'timezone': doc.get('timezone', ''),
+        'coordinates': doc.get('coordinates', ''),
+        'version': doc.get('version', 1)
+    })
 
 @app.route('/api/nosql/airports', methods=['GET'])
 def get_nosql_airports():
