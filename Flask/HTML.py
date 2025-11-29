@@ -1374,10 +1374,8 @@ def get_nosql_flights():
     query = {}
     if search:
         if column == 'flight_id':
-             # Try to search as string first, exact match usually for IDs
              query = {'_id': int(search) if search.isdigit() else search}
         elif column == 'route':
-            # Search Departure OR Arrival code
             query = {
                 "$or": [
                     {"departure.airport_code": {"$regex": search, "$options": "i"}},
@@ -1385,11 +1383,8 @@ def get_nosql_flights():
                 ]
             }
         else:
-            # Map simple names to nested document paths
             db_field = column
             if column == 'aircraft_code': db_field = 'aircraft.code'
-            
-            # Use regex for partial string match
             query = {db_field: {"$regex": search, "$options": "i"}}
         
     total = mongo.db.flights.count_documents(query)
@@ -1407,7 +1402,8 @@ def get_nosql_flights():
             'status': doc.get('status'),
             'aircraft_code': doc.get('aircraft', {}).get('code'),
             'actual_departure': doc.get('actual_departure'),
-            'actual_arrival': doc.get('actual_arrival')
+            'actual_arrival': doc.get('actual_arrival'),
+            'version': doc.get('version', 1) # Return version for concurrency
         })
     return jsonify({'flights': flights, 'total': total, 'page': page, 'total_pages': (total + per_page - 1) // per_page})
 
@@ -1421,7 +1417,8 @@ def create_nosql_flight():
         'status': data.get('status', 'Scheduled'),
         'departure': {'airport_code': data['departure_airport']}, 
         'arrival': {'airport_code': data['arrival_airport']},     
-        'aircraft': {'code': data['aircraft_code']}               
+        'aircraft': {'code': data['aircraft_code']},
+        'version': 1 # Initialize version
     }
     result = mongo.db.flights.insert_one(new_flight)
     return jsonify({'message': 'Flight created in MongoDB', 'id': str(result.inserted_id)}), 201
@@ -1429,27 +1426,57 @@ def create_nosql_flight():
 @app.route('/api/nosql/flights/<id>', methods=['PUT'])
 def update_nosql_flight(id):
     data = request.get_json()
+    
+    # 1. Get client version
+    client_version = data.get('version')
+    if client_version is None:
+        return jsonify({'error': 'Missing version for concurrency control'}), 400
+
     update_data = {}
     if 'flight_no' in data: update_data['flight_no'] = data['flight_no']
     if 'status' in data: update_data['status'] = data['status']
     if 'departure_airport' in data: update_data['departure.airport_code'] = data['departure_airport']
     if 'arrival_airport' in data: update_data['arrival.airport_code'] = data['arrival_airport']
+    
     try: query_id = int(id)
     except: query_id = ObjectId(id)
-    mongo.db.flights.update_one({'_id': query_id}, {'$set': update_data})
+
+    # 2. Atomic Update: Match ID AND Version
+    result = mongo.db.flights.update_one(
+        {'_id': query_id, 'version': int(client_version)}, 
+        {
+            '$set': update_data,
+            '$inc': {'version': 1} # Increment version on success
+        }
+    )
+
+    # 3. Handle Result
+    if result.matched_count == 0:
+        if mongo.db.flights.find_one({'_id': query_id}):
+            return jsonify({'error': 'CONCURRENCY CONFLICT: Record modified by another user.'}), 409
+        return jsonify({'error': 'Flight not found'}), 404
+
     return jsonify({'message': 'Flight updated in MongoDB'})
 
 @app.route('/api/nosql/flights/<id>', methods=['DELETE'])
 def delete_nosql_flight(id):
     try: query_id = int(id)
     except: query_id = ObjectId(id)
-    mongo.db.flights.delete_one({'_id': query_id})
+    
+    # Capture the result of the delete operation
+    result = mongo.db.flights.delete_one({'_id': query_id})
+    
+    # Check if anything was actually deleted
+    if result.deleted_count == 0:
+        return jsonify({'error': 'Flight not found or already deleted'}), 404
+        
     return jsonify({'message': 'Flight deleted from MongoDB'})
 
 # === NoSQL Booking CRUD (POST/PUT/DELETE) ===
 
 @app.route('/api/nosql/bookings', methods=['GET'])
 def get_nosql_bookings_formatted():
+    # ... (Keep existing code for this function, no changes needed for the list view) ...
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
     search = request.args.get('search', '')
@@ -1460,7 +1487,6 @@ def get_nosql_bookings_formatted():
         if column == 'book_ref':
             query = {'_id': {"$regex": search, "$options": "i"}}
         else:
-            # All other fields (ticket_no, passenger_name, etc) are inside 'tickets' array
             query = {f'tickets.{column}': {"$regex": search, "$options": "i"}}
 
     total = mongo.db.bookings.count_documents(query)
@@ -1475,9 +1501,28 @@ def get_nosql_bookings_formatted():
             'book_ref': b.get('_id'),
             'passenger_name': first_ticket.get('passenger_name', 'Unknown'),
             'passenger_id': first_ticket.get('passenger_id', 'N/A'),
-            'contact_data': first_ticket.get('contact_data', '{}')
+            'contact_data': first_ticket.get('contact_data', '{}'),
+            # No version needed here for the list view
         })
     return jsonify({'bookings': output, 'total': total, 'page': page, 'total_pages': (total + per_page - 1) // per_page})
+
+# NEW ENDPOINT: Needed for the Edit Modal to get the version
+@app.route('/api/nosql/bookings/<ticket_no>', methods=['GET'])
+def get_nosql_booking_single(ticket_no):
+    booking = mongo.db.bookings.find_one({"tickets.ticket_no": ticket_no})
+    if not booking: return jsonify({'error': 'Booking not found'}), 404
+    
+    # Extract ticket data
+    ticket_data = next((t for t in booking.get('tickets', []) if t['ticket_no'] == ticket_no), {})
+    
+    return jsonify({
+        'ticket_no': ticket_no,
+        'book_ref': booking['_id'],
+        'passenger_name': ticket_data.get('passenger_name'),
+        'passenger_id': ticket_data.get('passenger_id'),
+        'contact_data': ticket_data.get('contact_data'),
+        'version': booking.get('version', 1) # Return parent doc version
+    })
 
 @app.route('/api/nosql/bookings', methods=['POST'])
 def create_nosql_booking():
@@ -1491,14 +1536,22 @@ def create_nosql_booking():
     }
     existing = mongo.db.bookings.find_one({'_id': data['book_ref']})
     if existing:
-        mongo.db.bookings.update_one({'_id': data['book_ref']}, {'$push': {'tickets': new_ticket}})
+        # Optimistic locking optional here, but good practice to check version
+        mongo.db.bookings.update_one(
+            {'_id': data['book_ref']}, 
+            {
+                '$push': {'tickets': new_ticket},
+                '$inc': {'version': 1} # Increment version on change
+            }
+        )
         return jsonify({'message': 'Added ticket to existing booking'}), 201
     else:
         new_booking = {
             '_id': data['book_ref'],
             'book_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'total_amount': 0,
-            'tickets': [new_ticket]
+            'tickets': [new_ticket],
+            'version': 1 # Initialize version
         }
         mongo.db.bookings.insert_one(new_booking)
         return jsonify({'message': 'Created new booking with ticket'}), 201
@@ -1506,23 +1559,54 @@ def create_nosql_booking():
 @app.route('/api/nosql/bookings/<ticket_no>', methods=['PUT'])
 def update_nosql_booking(ticket_no):
     data = request.get_json()
+    client_version = data.get('version')
+    if client_version is None: return jsonify({'error': 'Missing version'}), 400
+
     update_fields = {}
     if 'passenger_name' in data: update_fields['tickets.$.passenger_name'] = data['passenger_name']
     if 'contact_data' in data: update_fields['tickets.$.contact_data'] = data['contact_data']
-    if not update_fields: return jsonify({'error': 'No fields to update'}), 400
-    result = mongo.db.bookings.update_one({'tickets.ticket_no': ticket_no}, {'$set': update_fields})
-    if result.matched_count == 0: return jsonify({'error': 'Ticket not found'}), 404
+    
+    # Include version increment
+    update_fields['version'] = int(client_version) + 1
+
+    # Match Ticket AND Version
+    result = mongo.db.bookings.update_one(
+        {'tickets.ticket_no': ticket_no, 'version': int(client_version)}, 
+        {'$set': update_fields}
+    )
+    
+    if result.matched_count == 0:
+        if mongo.db.bookings.find_one({'tickets.ticket_no': ticket_no}):
+             return jsonify({'error': 'CONCURRENCY CONFLICT: Booking modified by another user.'}), 409
+        return jsonify({'error': 'Ticket not found'}), 404
+        
     return jsonify({'message': 'Booking updated'})
 
 @app.route('/api/nosql/bookings/<ticket_no>', methods=['DELETE'])
 def delete_nosql_booking(ticket_no):
+    # 1. Find the parent booking document first
     booking = mongo.db.bookings.find_one({"tickets.ticket_no": ticket_no})
-    if not booking: return jsonify({'error': 'Ticket not found'}), 404
+    
+    # If the booking doesn't exist or ticket isn't in it -> 404
+    if not booking: 
+        return jsonify({'error': 'Ticket not found or already deleted'}), 404
     
     book_ref = booking['_id']
-    mongo.db.bookings.update_one({'_id': book_ref}, {'$pull': {'tickets': {'ticket_no': ticket_no}}})
     
-    # Check if empty and delete
+    # 2. Attempt to remove the ticket (Atomic Pull)
+    result = mongo.db.bookings.update_one(
+        {'_id': book_ref, 'tickets.ticket_no': ticket_no}, 
+        {
+            '$pull': {'tickets': {'ticket_no': ticket_no}},
+            '$inc': {'version': 1} # Important: Increment version of parent doc
+        }
+    )
+    
+    # 3. Check if anything was actually removed
+    if result.modified_count == 0:
+        return jsonify({'error': 'Ticket already deleted by another user'}), 404
+    
+    # 4. Cleanup: If the booking has no more tickets, delete the booking document
     updated = mongo.db.bookings.find_one({'_id': book_ref})
     if updated and len(updated.get('tickets', [])) == 0:
         mongo.db.bookings.delete_one({'_id': book_ref})
@@ -1540,7 +1624,7 @@ def get_nosql_aircraft():
     query = {}
     if search:
         db_field = column
-        if column == 'aircraft_code': db_field = '_id' # ID is the code in our NoSQL schema
+        if column == 'aircraft_code': db_field = '_id' 
         query = {db_field: {"$regex": search, "$options": "i"}}
 
     total = mongo.db.aircrafts.count_documents(query)
@@ -1551,14 +1635,20 @@ def get_nosql_aircraft():
         aircraft.append({
             'aircraft_code': doc['_id'],
             'model': doc.get('model', 'Unknown'),
-            'range': doc.get('range', 0)
+            'range': doc.get('range', 0),
+            'version': doc.get('version', 1) # Return version
         })
     return jsonify({'aircraft': aircraft, 'total': total, 'page': page, 'total_pages': (total//per_page)+1})
 
 @app.route('/api/nosql/aircraft', methods=['POST'])
 def create_nosql_aircraft():
     data = request.get_json()
-    new_ac = {'_id': data['aircraft_code'], 'model': data['model'], 'range': data['range']}
+    new_ac = {
+        '_id': data['aircraft_code'], 
+        'model': data['model'], 
+        'range': data['range'],
+        'version': 1 # Initialize
+    }
     try:
         mongo.db.aircrafts.insert_one(new_ac)
         return jsonify({'message': 'Aircraft created'}), 201
@@ -1568,12 +1658,29 @@ def create_nosql_aircraft():
 @app.route('/api/nosql/aircraft/<id>', methods=['PUT'])
 def update_nosql_aircraft(id):
     data = request.get_json()
-    mongo.db.aircrafts.update_one({'_id': id}, {'$set': {'range': data.get('range')}})
+    client_version = data.get('version')
+    if client_version is None: return jsonify({'error': 'Missing version'}), 400
+
+    result = mongo.db.aircrafts.update_one(
+        {'_id': id, 'version': int(client_version)}, 
+        {
+            '$set': {'range': data.get('range'), 'model': data.get('model')}, # Added model update
+            '$inc': {'version': 1}
+        }
+    )
+    if result.matched_count == 0:
+         if mongo.db.aircrafts.find_one({'_id': id}):
+            return jsonify({'error': 'CONCURRENCY CONFLICT'}), 409
+         return jsonify({'error': 'Aircraft not found'}), 404
     return jsonify({'message': 'Aircraft updated'})
 
 @app.route('/api/nosql/aircraft/<id>', methods=['DELETE'])
 def delete_nosql_aircraft(id):
-    mongo.db.aircrafts.delete_one({'_id': id})
+    result = mongo.db.aircrafts.delete_one({'_id': id})
+    
+    if result.deleted_count == 0:
+        return jsonify({'error': 'Aircraft not found or already deleted'}), 404
+        
     return jsonify({'message': 'Aircraft deleted'})
 
 @app.route('/api/nosql/airports', methods=['GET'])
@@ -1587,7 +1694,6 @@ def get_nosql_airports():
     if search:
         db_field = column
         if column == 'airport_code': db_field = '_id'
-        
         query = {db_field: {"$regex": search, "$options": "i"}}
         
     total = mongo.db.airports.count_documents(query)
@@ -1600,14 +1706,22 @@ def get_nosql_airports():
             'airport_name': doc.get('airport_name', 'Unknown'),
             'city': doc.get('city', 'Unknown'),
             'timezone': doc.get('timezone', ''),
-            'coordinates': doc.get('coordinates', '')
+            'coordinates': doc.get('coordinates', ''),
+            'version': doc.get('version', 1) # Return version
         })
     return jsonify({'airports': airports, 'total': total, 'page': page, 'total_pages': (total//per_page)+1})
 
 @app.route('/api/nosql/airports', methods=['POST'])
 def create_nosql_airport():
     data = request.get_json()
-    new_ap = {'_id': data['airport_code'], 'airport_name': data['airport_name'], 'city': data['city'], 'timezone': data.get('timezone'), 'coordinates': data.get('coordinates')}
+    new_ap = {
+        '_id': data['airport_code'], 
+        'airport_name': data['airport_name'], 
+        'city': data['city'], 
+        'timezone': data.get('timezone'), 
+        'coordinates': data.get('coordinates'),
+        'version': 1 # Initialize
+    }
     try:
         mongo.db.airports.insert_one(new_ap)
         return jsonify({'message': 'Airport created'}), 201
@@ -1617,17 +1731,28 @@ def create_nosql_airport():
 @app.route('/api/nosql/airports/<id>', methods=['PUT'])
 def update_nosql_airport(id):
     data = request.get_json()
-    update = {}
-    if 'airport_name' in data: update['airport_name'] = data['airport_name']
-    if 'city' in data: update['city'] = data['city']
-    if 'timezone' in data: update['timezone'] = data['timezone']
-    if 'coordinates' in data: update['coordinates'] = data['coordinates']
-    mongo.db.airports.update_one({'_id': id}, {'$set': update})
+    client_version = data.get('version')
+    if client_version is None: return jsonify({'error': 'Missing version'}), 400
+
+    update = {k: v for k, v in data.items() if k != 'version'}
+    
+    result = mongo.db.airports.update_one(
+        {'_id': id, 'version': int(client_version)}, 
+        {'$set': update, '$inc': {'version': 1}}
+    )
+    if result.matched_count == 0:
+         if mongo.db.airports.find_one({'_id': id}):
+            return jsonify({'error': 'CONCURRENCY CONFLICT'}), 409
+         return jsonify({'error': 'Airport not found'}), 404
     return jsonify({'message': 'Airport updated'})
 
 @app.route('/api/nosql/airports/<id>', methods=['DELETE'])
 def delete_nosql_airport(id):
-    mongo.db.airports.delete_one({'_id': id})
+    result = mongo.db.airports.delete_one({'_id': id})
+    
+    if result.deleted_count == 0:
+        return jsonify({'error': 'Airport not found or already deleted'}), 404
+        
     return jsonify({'message': 'Airport deleted'})
 
 if __name__ == '__main__':

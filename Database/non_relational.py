@@ -59,7 +59,8 @@ for row in cursor.fetchall():
         '_id': code, # Using code as ID is cleaner for lookups
         'model': parse_json(row['model']),
         'range': row['range'],
-        'seats': seats_map.get(code, []) # Embed the seats here
+        'seats': seats_map.get(code, []), # Embed the seats here
+        'version': 1
     })
 
 if aircrafts_list:
@@ -108,7 +109,8 @@ for row in cursor.fetchall():
             'airport_name': parse_json(row['arr_name']),
             'city': parse_json(row['arr_city']),
             'timezone': row['arr_tz']
-        }
+        },
+        'version': 1
     })
 
 if flights_list:
@@ -147,7 +149,8 @@ for row in cursor.fetchall():
             '_id': book_ref,
             'book_date': row['book_date'],
             'total_amount': row['total_amount'],
-            'tickets': {} 
+            'tickets': {},
+            'version': 1
         }
     
     ticket_no = row['ticket_no']
@@ -199,7 +202,8 @@ for row in cursor.fetchall():
         'airport_name': parse_json(row['airport_name']),
         'city': parse_json(row['city']),
         'coordinates': row['coordinates'],
-        'timezone': row['timezone']
+        'timezone': row['timezone'],
+        'version': 1
     })
 if airports:
     mongo_db.airports.insert_many(airports)

@@ -1,15 +1,10 @@
-let currentTab = 'flights';
+let currentTab = localStorage.getItem('crud_currentTab') || 'flights';
 let currentPage = 1;
 let currentMode = 'create'; // 'create' or 'edit'
 let currentRecordId = null;
-let crudUseNoSQL = false; // State for toggle
+let crudUseNoSQL = localStorage.getItem('crud_useNoSQL') === 'true'; // State for toggle
 
-// Toggle Source Function
-function toggleCrudSource() {
-    const toggle = document.getElementById('crudToggle');
-    crudUseNoSQL = toggle.checked;
-    
-    // Update UI visuals
+function updateCrudUI() {
     const title = document.getElementById('page-title');
     const labelSql = document.getElementById('crud-label-sql');
     const labelNoSql = document.getElementById('crud-label-nosql');
@@ -25,6 +20,18 @@ function toggleCrudSource() {
         labelSql.style.color = "#2196F3";
         labelNoSql.style.color = "#aaa";
     }
+}
+
+
+// Toggle Source Function
+function toggleCrudSource() {
+    const toggle = document.getElementById('crudToggle');
+    crudUseNoSQL = toggle.checked;
+    
+    // Save to storage
+    localStorage.setItem('crud_useNoSQL', crudUseNoSQL);
+    
+    updateCrudUI();
     
     currentPage = 1;
     loadData();
@@ -33,15 +40,21 @@ function toggleCrudSource() {
 // Tab switching
 function switchTab(tab) {
     currentTab = tab;
+    // Save to storage
+    localStorage.setItem('crud_currentTab', tab);
+    
     currentPage = 1;
     
     // Update tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
+    // Find button by onclick attribute to set active class safely
+    const btn = document.querySelector(`button[onclick="switchTab('${tab}')"]`);
+    if(btn) btn.classList.add('active');
     
     // Update tab content
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-    document.getElementById(`${tab}-tab`).classList.add('active');
+    const tabContent = document.getElementById(`${tab}-tab`);
+    if(tabContent) tabContent.classList.add('active');
     
     // Load data
     loadData();
@@ -413,6 +426,12 @@ async function deleteAirport(code) {
     }
 }
 
+// Helper to inject version for concurrency control
+function getVersionInput(data) {
+    // Only add version if it exists in the data (NoSQL mode)
+    return (data && data.version !== undefined) ? `<input type="hidden" name="version" value="${data.version}">` : '';
+}
+
 // Form submission
 async function submitForm(type) {
     const formData = new FormData(document.getElementById('record-form'));
@@ -432,7 +451,7 @@ async function submitForm(type) {
     let endpointType = type;
     if(type === 'flight') endpointType = 'flights';
     if(type === 'booking') endpointType = 'bookings';
-    if(type === 'airport') endpointType = 'airports'; // NEW
+    if(type === 'airport') endpointType = 'airports';
 
     let url, method;
     if (currentMode === 'create') {
@@ -456,6 +475,11 @@ async function submitForm(type) {
         
         if (response.ok) {
             showMessage(`${endpointType}`, result.message, 'success');
+            closeModal();
+            loadData();
+        } else if (response.status === 409) {
+            // === NEW: Handle Concurrency Conflict ===
+            alert("⚠️ Update Failed: Data Conflict.\n\nAnother user has modified this record since you opened it.\n\nThe page will refresh to show the latest data.");
             closeModal();
             loadData();
         } else {
@@ -482,7 +506,7 @@ function getFormHtml(type, data) {
 function getFlightForm(flight) {
     return `
         <form id="record-form" onsubmit="event.preventDefault(); submitForm('flight');">
-            <div class="form-group">
+            ${getVersionInput(flight)} <div class="form-group">
                 <label>Flight Number *</label>
                 <input type="text" name="flight_no" value="${flight?.flight_no || ''}" required>
             </div>
@@ -545,7 +569,7 @@ function getBookingForm(booking) {
     
     return `
         <form id="record-form" onsubmit="event.preventDefault(); submitForm('booking');">
-            ${currentMode === 'create' ? `
+            ${getVersionInput(booking)} ${currentMode === 'create' ? `
             <div class="form-group">
                 <label>Ticket Number *</label>
                 <input type="text" name="ticket_no" value="${booking?.ticket_no || ''}" required>
@@ -582,7 +606,7 @@ function getBookingForm(booking) {
 function getAircraftForm(aircraft) {
     return `
         <form id="record-form" onsubmit="event.preventDefault(); submitForm('aircraft');">
-            ${currentMode === 'create' ? `
+            ${getVersionInput(aircraft)} ${currentMode === 'create' ? `
             <div class="form-group">
                 <label>Aircraft Code *</label>
                 <input type="text" name="aircraft_code" value="${aircraft?.aircraft_code || ''}" required maxlength="3">
@@ -604,11 +628,11 @@ function getAircraftForm(aircraft) {
     `;
 }
 
-// NEW: Airport Form
+
 function getAirportForm(airport) {
     return `
         <form id="record-form" onsubmit="event.preventDefault(); submitForm('airport');">
-            ${currentMode === 'create' ? `
+            ${getVersionInput(airport)} ${currentMode === 'create' ? `
             <div class="form-group">
                 <label>Airport Code *</label>
                 <input type="text" name="airport_code" value="${airport?.airport_code || ''}" required maxlength="3" style="text-transform:uppercase">
@@ -693,5 +717,23 @@ function capitalizeFirst(str) {
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
+    // 1. Restore Checkbox
+    const toggle = document.getElementById('crudToggle');
+    if (toggle) {
+        toggle.checked = crudUseNoSQL;
+        updateCrudUI();
+    }
+
+    // 2. Restore Active Tab UI
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    
+    const activeBtn = document.querySelector(`button[onclick="switchTab('${currentTab}')"]`);
+    if(activeBtn) activeBtn.classList.add('active');
+    
+    const activeContent = document.getElementById(`${currentTab}-tab`);
+    if(activeContent) activeContent.classList.add('active');
+
+    // 3. Load Data
     loadData();
 });
