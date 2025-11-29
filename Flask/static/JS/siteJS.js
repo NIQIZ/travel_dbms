@@ -408,21 +408,77 @@ function createMarketShareChart(data) {
 // 4. 10 Least Busy Routes
 function createLeastBusyChart(data) {
     if(!data) data = [];
+
+    // 1. Sort the data from smallest to largest so it looks like a staircase
+    // This makes the lollipop effect look much neater.
+    data.sort((a, b) => a.market_share_percent - b.market_share_percent);
+
     createOrUpdateChart('leastBusyChart', {
-        type: 'bar',
+        type: 'bar', // The base type is still a bar chart
         data: {
             labels: data.map(d => d.route),
-            datasets: [{
-                label: 'Market Share (%)',
-                data: data.map(d => d.market_share_percent),
-                backgroundColor: '#FF5722',
-            }]
+            datasets: [
+                // DATASET 1: THE CANDY (The Dots)
+                {
+                    type: 'line', 
+                    label: 'Market Share %',
+                    data: data.map(d => d.market_share_percent),
+                    backgroundColor: '#FF5722', // Bright Orange
+                    borderColor: '#FF5722',
+                    pointRadius: 6,      // Size of the dot
+                    pointHoverRadius: 8, // Grows when you hover
+                    borderWidth: 0,      // IMPORTANT: Hides the line connecting the dots
+                    fill: false
+                },
+                // DATASET 2: THE STICK (The Skinny Bar)
+                {
+                    type: 'bar',
+                    label: 'Stick', // We won't show this in the legend
+                    data: data.map(d => d.market_share_percent),
+                    backgroundColor: 'rgba(255, 87, 34, 0.5)', // Faded Orange
+                    barPercentage: 0.1,  // <--- The Magic: Makes the bar very thin!
+                    categoryPercentage: 0.8
+                }
+            ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            scales: { y: { beginAtZero: true }, x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 10 } } } },
-            plugins: { tooltip: { callbacks: { label: function(context) { return `Market Share: ${context.parsed.y}%`; } } } }
+            plugins: {
+                legend: { display: false }, // Hide legend to keep it clean
+                tooltip: {
+                    // Only show the tooltip when hovering over the Dot (Dataset 0)
+                    // We hide it for the Stick (Dataset 1) so you don't get double popups
+                    filter: function(tooltipItem) {
+                        return tooltipItem.datasetIndex === 0;
+                    },
+                    callbacks: {
+                        label: function(context) {
+                            return ` Market Share: ${context.parsed.y}%`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'Market Share (%)' },
+                    grid: {
+                        color: 'rgba(0,0,0,0.05)', // Very faint grid lines
+                        borderDash: [5, 5]         // Dotted lines look cool with lollipops
+                    }
+                },
+                x: {
+                    ticks: {
+                        maxRotation: 45,
+                        minRotation: 45,
+                        font: { size: 10 }
+                    },
+                    grid: {
+                        display: false // Hide vertical lines so the sticks stand out
+                    }
+                }
+            }
         }
     });
 }
@@ -735,18 +791,33 @@ function createDestinationsChart(data) {
     });
 }
 
-// 10. Top 10 Planes with Most Mileage
+// 10. Top 5 Planes with Most Mileage
 function createUtilizationChart(data) {
     if(!data) data = [];
-    const backgroundColors = ['rgba(255, 99, 132, 0.7)', 'rgba(54, 162, 235, 0.7)', 'rgba(255, 206, 86, 0.7)', 'rgba(75, 192, 192, 0.7)', 'rgba(153, 102, 255, 0.7)'];
+
+    // 1. SORT: Make sure the big numbers are at the top (just in case SQL didn't sort them)
+    data.sort((a, b) => b.total_mileage - a.total_mileage);
+
+    // 2. SLICE: Only keep the first 5 items (The Top 5)
+    const top5Data = data.slice(0, 5);
+
+    // We have exactly 5 pretty colors for our 5 planes!
+    const backgroundColors = [
+        'rgba(255, 99, 132, 0.7)',  // Pink
+        'rgba(54, 162, 235, 0.7)',  // Blue
+        'rgba(255, 206, 86, 0.7)',  // Yellow
+        'rgba(75, 192, 192, 0.7)',  // Teal
+        'rgba(153, 102, 255, 0.7)'  // Purple
+    ];
 
     createOrUpdateChart('utilizationChart', {
         type: 'polarArea',
         data: {
-            labels: data.map(d => `${d.aircraft_code} (${d.aircraft_model})`),
+            // I added the mileage to the label so you can see it in the Legend!
+            labels: top5Data.map(d => `${d.aircraft_code} (${d.aircraft_model}) : ${(d.total_mileage/1000).toFixed(0)}k mi`),
             datasets: [{
                 label: 'Total Mileage',
-                data: data.map(d => d.total_mileage),
+                data: top5Data.map(d => d.total_mileage),
                 backgroundColor: backgroundColors,
                 borderWidth: 1
             }]
@@ -754,11 +825,28 @@ function createUtilizationChart(data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            layout: { padding: 20 },
-            scales: { r: { grid: { color: 'rgba(200, 200, 200, 0.3)' }, ticks: { display: false }, pointLabels: { display: false } } },
+            layout: { padding: 10 },
+            scales: {
+                r: {
+                    grid: { color: 'rgba(200, 200, 200, 0.3)' },
+                    ticks: { display: false },       // Hide numbers on the chart
+                    pointLabels: { display: false }  // Hide text on the chart edge
+                }
+            },
             plugins: {
-                legend: { display: true, position: 'right', labels: { font: { size: 11 }, padding: 20 } },
-                tooltip: { callbacks: { label: function(context) { return ' ' + context.label + ': ' + context.parsed.r.toLocaleString() + ' miles'; } } }
+                legend: { 
+                    display: true, 
+                    position: 'right', 
+                    labels: { font: { size: 11 }, padding: 15 } 
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            // Extract just the name for the tooltip so it isn't repeated
+                            return ' ' + context.formattedValue + ' miles';
+                        }
+                    }
+                }
             }
         }
     });
