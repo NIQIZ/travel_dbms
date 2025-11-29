@@ -151,11 +151,6 @@ function logPerformance(logs) {
   });
 }
 
-// Initialize on load
-document.addEventListener("DOMContentLoaded", function () {
-  loadDashboardData();
-});
-
 // === SAFE RENDER HELPER ===
 function safeRender(renderFunction, data, name) {
   try {
