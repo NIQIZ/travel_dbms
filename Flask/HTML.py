@@ -336,6 +336,8 @@ def manage(): return render_template('crudManager.html')
 def validate_column(col, allowed):
     return col if col in allowed else allowed[0]
 
+# --- UPDATE IN HTML.py ---
+
 @app.route('/api/flights', methods=['GET'])
 def get_flights():
     try:
@@ -344,19 +346,22 @@ def get_flights():
         search = request.args.get('search', '')
         column = request.args.get('column', 'flight_no')
         
-        # REMOVED 'route', ADDED missing schema columns
+        # UPDATE: Add 'departure_airport' and 'arrival_airport' to this list
         allowed_cols = [
             'flight_id', 'flight_no', 'scheduled_departure', 'scheduled_arrival', 
             'departure_airport', 'arrival_airport', 'status', 'aircraft_code', 
             'actual_departure', 'actual_arrival'
         ]
+        
+        # Security check: If column is not in allowed_cols, it defaults to flight_id
         safe_col = validate_column(column, allowed_cols)
 
         conn = get_db_connection()
         offset = (page - 1) * per_page
         
-        # Standard query structure
+        # The generic SQL logic handles the rest automatically
         if search:
+            # e.g., WHERE departure_airport LIKE '%JFK%'
             total = conn.execute(f"SELECT COUNT(*) FROM flights WHERE {safe_col} LIKE ?", (f'%{search}%',)).fetchone()[0]
             rows = conn.execute(f"SELECT * FROM flights WHERE {safe_col} LIKE ? ORDER BY scheduled_departure DESC LIMIT ? OFFSET ?", (f'%{search}%', per_page, offset)).fetchall()
         else:
@@ -1857,7 +1862,12 @@ def get_nosql_flights():
             }
         else:
             db_field = column
+            # --- MAPPING START ---
             if column == 'aircraft_code': db_field = 'aircraft.code'
+            elif column == 'departure_airport': db_field = 'departure.airport_code' # Map SQL Col -> NoSQL Field
+            elif column == 'arrival_airport': db_field = 'arrival.airport_code'     # Map SQL Col -> NoSQL Field
+            # --- MAPPING END ---
+            
             query = {db_field: {"$regex": search, "$options": "i"}}
         
     total = mongo.db.flights.count_documents(query)
@@ -1876,7 +1886,7 @@ def get_nosql_flights():
             'aircraft_code': doc.get('aircraft', {}).get('code'),
             'actual_departure': doc.get('actual_departure'),
             'actual_arrival': doc.get('actual_arrival'),
-            'version': doc.get('version', 1) # Return version for concurrency
+            'version': doc.get('version', 1)
         })
     return jsonify({'flights': flights, 'total': total, 'page': page, 'total_pages': (total + per_page - 1) // per_page})
 
@@ -2085,9 +2095,15 @@ def get_nosql_aircraft():
 
     query = {}
     if search:
-        db_field = column
-        if column == 'aircraft_code': db_field = '_id' 
-        query = {db_field: {"$regex": search, "$options": "i"}}
+        if column == 'aircraft_code':
+            query = {'_id': {"$regex": search, "$options": "i"}}
+        elif column == 'range':
+             # Range search logic
+             try: query = {'range': int(search)}
+             except: query = {'range': -1}
+        else:
+            # Model or other fields
+            query = {column: {"$regex": search, "$options": "i"}}
 
     total = mongo.db.aircrafts.count_documents(query)
     cursor = mongo.db.aircrafts.find(query).skip((page-1)*per_page).limit(per_page)
@@ -2098,7 +2114,7 @@ def get_nosql_aircraft():
             'aircraft_code': doc['_id'],
             'model': doc.get('model', 'Unknown'),
             'range': doc.get('range', 0),
-            'version': doc.get('version', 1) # Return version
+            'version': doc.get('version', 1)
         })
     return jsonify({'aircraft': aircraft, 'total': total, 'page': page, 'total_pages': (total//per_page)+1})
 
@@ -2368,13 +2384,14 @@ def get_nosql_ticket_flights():
     page = int(request.args.get('page', 1))
     per_page = 20
     search = request.args.get('search', '')
+    column = request.args.get('column', 'ticket_no')
     
     pipeline = [
         {"$unwind": "$tickets"},
         {"$unwind": "$tickets.flight_legs"},
         {"$project": {
             "ticket_no": "$tickets.ticket_no",
-            "flight_id": {"$toString": "$tickets.flight_legs.flight_id"},
+            "flight_id": {"$toString": "$tickets.flight_legs.flight_id"}, # Cast to string for search
             "fare_conditions": "$tickets.flight_legs.fare_conditions",
             "amount": "$tickets.flight_legs.amount",
             "_id": 0
@@ -2382,11 +2399,16 @@ def get_nosql_ticket_flights():
     ]
     
     if search:
-        pipeline.append({
-            "$match": {
-                "ticket_no": {"$regex": search, "$options": "i"}
-            }
-        })
+        match_stage = {}
+        if column == 'amount':
+             # Exact match for numbers
+             try: match_stage['amount'] = float(search)
+             except: match_stage['amount'] = -1
+        else:
+             # Regex for strings
+             match_stage[column] = {"$regex": search, "$options": "i"}
+             
+        pipeline.append({"$match": match_stage})
 
     # Pagination Logic
     count_pipeline = pipeline[:]
@@ -2495,6 +2517,7 @@ def get_nosql_seats():
     page = int(request.args.get('page', 1))
     per_page = 20
     search = request.args.get('search', '')
+    column = request.args.get('column', 'aircraft_code')
     
     pipeline = [
         {"$unwind": "$seats"},
@@ -2507,11 +2530,8 @@ def get_nosql_seats():
     ]
 
     if search:
-        pipeline.append({
-            "$match": {
-                "aircraft_code": {"$regex": search, "$options": "i"}
-            }
-        })
+        # Simple regex works for all 3 columns here as they are strings
+        pipeline.append({"$match": {column: {"$regex": search, "$options": "i"}}})
 
     count_pipeline = pipeline[:]
     count_pipeline.append({"$count": "total"})
@@ -2604,11 +2624,11 @@ def get_nosql_boarding_passes():
     page = int(request.args.get('page', 1))
     per_page = 20
     search = request.args.get('search', '')
+    column = request.args.get('column', 'ticket_no')
     
     pipeline = [
         {"$unwind": "$tickets"},
         {"$unwind": "$tickets.flight_legs"},
-        # Only show legs that have a boarding pass
         {"$match": {"tickets.flight_legs.boarding_pass": {"$exists": True}}},
         {"$project": {
             "ticket_no": "$tickets.ticket_no",
@@ -2620,11 +2640,13 @@ def get_nosql_boarding_passes():
     ]
 
     if search:
-        pipeline.append({
-            "$match": {
-                "ticket_no": {"$regex": search, "$options": "i"}
-            }
-        })
+        match_stage = {}
+        if column == 'boarding_no':
+             try: match_stage['boarding_no'] = int(search)
+             except: match_stage['boarding_no'] = -1
+        else:
+             match_stage[column] = {"$regex": search, "$options": "i"}
+        pipeline.append({"$match": match_stage})
 
     count_pipeline = pipeline[:]
     count_pipeline.append({"$count": "total"})

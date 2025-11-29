@@ -85,7 +85,7 @@
             <div class="search-box">
                 <select id="flights-search-col" class="form-select">
                     <option value="flight_no">Flight No</option>
-                    <option value="status">Status</option>
+                    <option value="departure_airport">Dep Airport</option> <option value="arrival_airport">Arr Airport</option>   <option value="status">Status</option>
                 </select>
                 <input type="text" id="flights-search" placeholder="Search flights...">
                 <button class="btn btn-primary" onclick="searchData('flights')">Search</button>
@@ -96,7 +96,7 @@
         <div class="data-table">
             <table>
                 <thead><tr><th>ID</th><th>No</th><th>Dep</th><th>Arr</th><th>Sched. Dep</th><th>Sched. Arr</th><th>Status</th><th>Aircraft</th><th>Act. Dep</th><th>Act. Arr</th><th>Actions</th></tr></thead>
-                <tbody id="flights-tbody"><tr><td colspan="7">Loading...</td></tr></tbody>
+                <tbody id="flights-tbody"><tr><td colspan="11">Loading...</td></tr></tbody>
             </table>
         </div>
         <div class="pagination" id="flights-pagination"></div>
@@ -105,7 +105,12 @@
     <div id="aircraft-tab" class="tab-content">
         <div class="controls">
             <div class="search-box">
-                <input type="text" id="aircraft-search" placeholder="Search aircraft code...">
+                <select id="aircraft-search-col" class="form-select">
+                    <option value="aircraft_code">Code</option>
+                    <option value="model">Model</option>
+                    <option value="range">Range</option>
+                </select>
+                <input type="text" id="aircraft-search" placeholder="Search...">
                 <button class="btn btn-primary" onclick="searchData('aircraft')">Search</button>
             </div>
             <button class="btn btn-success" onclick="openCreateModal('aircraft')">➕ New Aircraft</button>
@@ -123,7 +128,14 @@
     <div id="airports-tab" class="tab-content">
         <div class="controls">
             <div class="search-box">
-                <input type="text" id="airports-search" placeholder="Search airport code...">
+                <select id="airports-search-col" class="form-select">
+                    <option value="airport_code">Code</option>
+                    <option value="airport_name">Name</option>
+                    <option value="city">City</option>
+                    <option value="coordinates">Coordinates</option>
+                    <option value="timezone">Timezone</option>
+                </select>
+                <input type="text" id="airports-search" placeholder="Search...">
                 <button class="btn btn-primary" onclick="searchData('airports')">Search</button>
             </div>
             <button class="btn btn-success" onclick="openCreateModal('airport')">➕ New Airport</button>
@@ -143,7 +155,7 @@
             <div class="search-box">
                 <select id="bookings-search-col" class="form-select">
                     <option value="book_ref">Book Ref</option>
-                </select>
+                    <option value="total_amount">Amount</option> </select>
                 <input type="text" id="bookings-search" placeholder="Search bookings...">
                 <button class="btn btn-primary" onclick="searchData('bookings')">Search</button>
             </div>
@@ -185,7 +197,13 @@
     <div id="ticket_flights-tab" class="tab-content">
         <div class="controls">
             <div class="search-box">
-                <input type="text" id="ticket_flights-search" placeholder="Search Ticket No...">
+                <select id="ticket_flights-search-col" class="form-select">
+                    <option value="ticket_no">Ticket No</option>
+                    <option value="flight_id">Flight ID</option>
+                    <option value="fare_conditions">Fare Conditions</option>
+                    <option value="amount">Amount</option>
+                </select>
+                <input type="text" id="ticket_flights-search" placeholder="Search...">
                 <button class="btn btn-primary" onclick="searchData('ticket_flights')">Search</button>
             </div>
             <button class="btn btn-success" onclick="openCreateModal('ticket_flight')">➕ New Ticket Flight</button>
@@ -203,7 +221,12 @@
     <div id="seats-tab" class="tab-content">
         <div class="controls">
             <div class="search-box">
-                <input type="text" id="seats-search" placeholder="Search Aircraft Code...">
+                <select id="seats-search-col" class="form-select">
+                    <option value="aircraft_code">Aircraft Code</option>
+                    <option value="seat_no">Seat No</option>
+                    <option value="fare_conditions">Fare Conditions</option>
+                </select>
+                <input type="text" id="seats-search" placeholder="Search...">
                 <button class="btn btn-primary" onclick="searchData('seats')">Search</button>
             </div>
             <button class="btn btn-success" onclick="openCreateModal('seat')">➕ New Seat</button>
@@ -221,7 +244,13 @@
     <div id="boarding_passes-tab" class="tab-content">
         <div class="controls">
             <div class="search-box">
-                <input type="text" id="boarding_passes-search" placeholder="Search Ticket No...">
+                <select id="boarding_passes-search-col" class="form-select">
+                    <option value="ticket_no">Ticket No</option>
+                    <option value="flight_id">Flight ID</option>
+                    <option value="boarding_no">Boarding No</option>
+                    <option value="seat_no">Seat No</option>
+                </select>
+                <input type="text" id="boarding_passes-search" placeholder="Search...">
                 <button class="btn btn-primary" onclick="searchData('boarding_passes')">Search</button>
             </div>
             <button class="btn btn-success" onclick="openCreateModal('boarding_pass')">➕ New Boarding Pass</button>
