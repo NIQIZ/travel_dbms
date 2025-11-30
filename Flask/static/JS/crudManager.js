@@ -124,19 +124,22 @@ function searchData(tab) {
 
 function renderFlights(list) {
     const tbody = document.getElementById('flights-tbody');
-    // Updated to show Dep/Arr separately, plus Actual times and Scheduled Arrival
     tbody.innerHTML = list.map(d => `
         <tr>
             <td>${d.flight_id}</td>
             <td>${d.flight_no}</td>
             <td>${d.departure_airport}</td>
             <td>${d.arrival_airport}</td>
+            
             <td>${formatDate(d.scheduled_departure)}</td>
             <td>${formatDate(d.scheduled_arrival)}</td>
+            
             <td><span class="badge badge-info">${d.status}</span></td>
             <td>${d.aircraft_code}</td>
+            
             <td class="small text-muted">${formatDate(d.actual_departure)}</td>
             <td class="small text-muted">${formatDate(d.actual_arrival)}</td>
+            
             <td>${renderActions(d.flight_id)}</td>
         </tr>`).join('') || noData(11);
 }
@@ -439,7 +442,38 @@ function getFormHtml(d) {
 }
 
 // UTILS
-function showMessage(msg) { const d=document.getElementById(`${currentTab}-message`); if(d){d.textContent=msg; setTimeout(()=>d.textContent='', 3000);} }
-function formatDate(d) { if(!d) return ''; return new Date(d).toLocaleString(); }
-function startPolling() { pollingInterval = setInterval(loadData, 5000); }
-function stopPolling() { clearInterval(pollingInterval); }
+function showMessage(msg, type='info') { 
+    const d = document.getElementById(`${currentTab}-message`); 
+    if(d){
+        d.textContent = msg; 
+        d.className = type === 'error' ? 'text-danger' : 'text-success';
+        setTimeout(() => { d.textContent = ''; d.className = ''; }, 3000);
+    } 
+}
+function formatDate(d) { 
+    if (!d || d === 'None' || d === 'null') return '-'; 
+    
+    // 1. Normalize the string to be ISO compatible (Fixes "Invalid Date" in Safari/Firefox)
+    // Converts "2017-09-14 20:55:00+03" -> "2017-09-14T20:55:00+03"
+    let safeDate = String(d).replace(' ', 'T');
+
+    // 2. Parse the date
+    const dateObj = new Date(safeDate);
+    
+    // 3. Fallback: If parsing still fails, return the raw string so it's not blank/error
+    if (isNaN(dateObj.getTime())) {
+        return d.split('+')[0]; // Return the date part, stripping timezone if complex
+    }
+    
+    // 4. Return consistent format (e.g., "9/14/2017, 8:55:00 PM")
+    return dateObj.toLocaleString(); 
+}
+
+function startPolling() { 
+    if(pollingInterval) clearInterval(pollingInterval);
+    pollingInterval = setInterval(loadData, 5000); 
+}
+
+function stopPolling() { 
+    if(pollingInterval) clearInterval(pollingInterval); 
+}
