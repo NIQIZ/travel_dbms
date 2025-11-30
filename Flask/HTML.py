@@ -2357,15 +2357,28 @@ def create_nosql_ticket():
 @app.route('/api/nosql/tickets/<ticket_no>', methods=['PUT'])
 def update_nosql_ticket(ticket_no):
     data = request.get_json()
-    # Update specific ticket in the array using positional operator $
+    client_version = data.get('version')
+    if client_version is None: return jsonify({'error': 'Missing version'}), 400
+
+    # 1. ATOMIC UPDATE: Check Ticket No AND Version
     result = mongo.db.bookings.update_one(
-        {"tickets.ticket_no": ticket_no},
+        {
+            "tickets.ticket_no": ticket_no, 
+            "version": int(client_version) # <--- The Concurrency Guard
+        },
         {
             "$set": {"tickets.$.passenger_id": data['passenger_id']},
             "$inc": {"version": 1}
         }
     )
-    if result.matched_count == 0: return jsonify({'error': 'Ticket not found'}), 404
+
+    # 2. CONCURRENCY CHECK
+    if result.matched_count == 0:
+        # If no match, check if the record actually exists (ignoring version)
+        if mongo.db.bookings.find_one({"tickets.ticket_no": ticket_no}):
+            return jsonify({'error': 'CONCURRENCY CONFLICT: Modified by another user'}), 409
+        return jsonify({'error': 'Ticket not found'}), 404
+
     return jsonify({'message': 'Ticket updated'})
 
 @app.route('/api/nosql/tickets/<ticket_no>', methods=['DELETE'])
@@ -2476,10 +2489,14 @@ def update_nosql_ticket_flight(ids):
     try:
         ticket_no, flight_id = ids.split('|')
         data = request.get_json()
+        client_version = data.get('version')
+        if client_version is None: return jsonify({'error': 'Missing version'}), 400
         
-        # Use arrayFilters to update the specific leg inside the specific ticket
         result = mongo.db.bookings.update_one(
-            {"tickets.ticket_no": ticket_no},
+            {
+                "tickets.ticket_no": ticket_no,
+                "version": int(client_version) # <--- Guard
+            },
             {
                 "$set": {
                     "tickets.$[t].flight_legs.$[f].fare_conditions": data['fare_conditions'],
@@ -2492,7 +2509,21 @@ def update_nosql_ticket_flight(ids):
                 {"f.flight_id": int(flight_id)}
             ]
         )
-        if result.matched_count == 0: return jsonify({'error': 'Record not found'}), 404
+
+        if result.matched_count == 0:
+            # Check existence without version
+            exists = mongo.db.bookings.find_one({
+                "tickets": {
+                    "$elemMatch": {
+                        "ticket_no": ticket_no,
+                        "flight_legs.flight_id": int(flight_id)
+                    }
+                }
+            })
+            if exists:
+                return jsonify({'error': 'CONCURRENCY CONFLICT: Modified by another user'}), 409
+            return jsonify({'error': 'Record not found'}), 404
+
         return jsonify({'message': 'Updated'})
     except Exception as e: return jsonify({'error': str(e)}), 500
 
@@ -2593,16 +2624,26 @@ def update_nosql_seat(ids):
     try:
         ac_code, seat_no = ids.split('|')
         data = request.get_json()
+        client_version = data.get('version')
+        if client_version is None: return jsonify({'error': 'Missing version'}), 400
         
-        # Update specific seat in the array
         result = mongo.db.aircrafts.update_one(
-            {"_id": ac_code, "seats.seat_no": seat_no},
+            {
+                "_id": ac_code, 
+                "seats.seat_no": seat_no,
+                "version": int(client_version) # <--- Guard
+            },
             {
                 "$set": {"seats.$.fare_conditions": data['fare_conditions']},
                 "$inc": {"version": 1}
             }
         )
-        if result.matched_count == 0: return jsonify({'error': 'Seat not found'}), 404
+
+        if result.matched_count == 0:
+            if mongo.db.aircrafts.find_one({"_id": ac_code, "seats.seat_no": seat_no}):
+                return jsonify({'error': 'CONCURRENCY CONFLICT: Modified by another user'}), 409
+            return jsonify({'error': 'Seat not found'}), 404
+
         return jsonify({'message': 'Seat updated'})
     except Exception as e: return jsonify({'error': str(e)}), 500
 
@@ -2720,9 +2761,14 @@ def update_nosql_bp(ids):
     try:
         ticket_no, flight_id = ids.split('|')
         data = request.get_json()
+        client_version = data.get('version')
+        if client_version is None: return jsonify({'error': 'Missing version'}), 400
         
         result = mongo.db.bookings.update_one(
-            {"tickets.ticket_no": ticket_no},
+            {
+                "tickets.ticket_no": ticket_no,
+                "version": int(client_version) # <--- Guard
+            },
             {
                 "$set": {
                     "tickets.$[t].flight_legs.$[f].boarding_pass.boarding_no": int(data['boarding_no']),
@@ -2735,10 +2781,16 @@ def update_nosql_bp(ids):
                 {"f.flight_id": int(flight_id)}
             ]
         )
-        if result.matched_count == 0: return jsonify({'error': 'Record not found'}), 404
+
+        if result.matched_count == 0:
+            # Simple check: does the ticket exist?
+            if mongo.db.bookings.find_one({"tickets.ticket_no": ticket_no}):
+                return jsonify({'error': 'CONCURRENCY CONFLICT: Modified by another user'}), 409
+            return jsonify({'error': 'Record not found'}), 404
+
         return jsonify({'message': 'Updated'})
     except Exception as e: return jsonify({'error': str(e)}), 500
-
+    
 @app.route('/api/nosql/boarding_passes/<ids>', methods=['DELETE'])
 def delete_nosql_bp(ids):
     try:
